@@ -1,0 +1,894 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>LQC Shipping Tracker</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f1f5f9;color:#1e293b;}
+  input,select,textarea{font-family:inherit;outline:none;}
+  input:focus,select:focus{border-color:#b45309!important;}
+  button{font-family:inherit;}
+  ::-webkit-scrollbar{width:6px;height:6px;}
+  ::-webkit-scrollbar-track{background:transparent;}
+  ::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:3px;}
+  .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:flex-start;justify-content:center;z-index:999;padding-top:40px;overflow:auto;}
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const {useState,useEffect,useMemo,useCallback,useRef} = React;
+
+// ─── CONFIG — paste your Apps Script Web App URL here ─────
+const API_URL = "https://script.google.com/macros/s/AKfycbyAXQEaHH6XwKSspkODG9sWbdtmC47dEuo4f32Z_8gPolhMhP9VWYEK5lHGLL6YYJb2Yw/exec";
+const APP_PIN = "1234"; // Must match PIN in Apps Script
+
+// ─── CONSTANTS ────────────────────────────────────────────
+const STATUSES = ["PO Placed","In Production","Ready to Ship","In Transit","Arrived","Delivered"];
+const STATUS_COLORS = {"PO Placed":"#6b7280","In Production":"#b45309","Ready to Ship":"#0284c7","In Transit":"#7c3aed","Arrived":"#065f46","Delivered":"#374151"};
+const MODEL_COLORS = {"Direct to Client":"#b45309","US Warehouse":"#0e7490","Port Pickup":"#7c3aed"};
+const LANE_DAYS = {east:55,west:30,gulf:40,default:45};
+const WARN_DAYS = 3;
+const TABS = ["Dashboard","Shipments","SKU Search","Timeline","Calendar","Alerts","Analytics","Manage"];
+
+const V = {
+  bg:"#ffffff", bg2:"#f8fafc", bg3:"#f1f5f9",
+  border:"rgba(0,0,0,.1)", border2:"rgba(0,0,0,.18)",
+  text:"#1e293b", text2:"#64748b", slate:"#334155"
+};
+
+// ─── UTILS ────────────────────────────────────────────────
+const today = new Date(); today.setHours(0,0,0,0);
+function parseDate(s){if(!s||s==="tba")return null;const d=new Date(s);return isNaN(d)?null:d;}
+function fmtDate(s){const d=parseDate(s);if(!d)return"—";return d.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"});}
+function daysDiff(d){if(!d)return null;return Math.round((d-today)/86400000);}
+function getLaneDays(pod=""){
+  const p=pod.toLowerCase();
+  if(p.includes("new york")||p.includes("newark")||p.includes("boston")||p.includes("ny/nj")||p.includes("nyc"))return LANE_DAYS.east;
+  if(p.includes("oakland")||p.includes("los angeles")||p.includes("lax")||p.includes("lgb")||p.includes("long beach")||p.includes("los")||p.includes("tacoma")||p.includes("seattle")||p.includes("vancouver"))return LANE_DAYS.west;
+  if(p.includes("houston")||p.includes("galveston"))return LANE_DAYS.gulf;
+  return LANE_DAYS.default;
+}
+
+// ─── API ──────────────────────────────────────────────────
+async function apiGet(action){
+  const r=await fetch(`${API_URL}?action=${action}&pin=${APP_PIN}`);
+  return r.json();
+}
+async function apiPost(body){
+  const r=await fetch(API_URL,{method:"POST",body:JSON.stringify({...body,pin:APP_PIN})});
+  return r.json();
+}
+
+// ─── ALERT ENGINE ─────────────────────────────────────────
+function buildAlerts(data,dismissed){
+  const alerts=[];
+  data.forEach(r=>{
+    const etd=parseDate(r["ETD"]),eta=parseDate(r["ETA"]),mabd=parseDate(r["MABD"]);
+    const status=r["Status"];
+    const active=!["Delivered","Arrived"].includes(status);
+    const po=r["LQC PO#"],customer=r["Customer"],agent=r["Agent"],dest=r["Destination"]||r["POD"];
+    if(eta&&status==="In Transit"&&daysDiff(eta)<0){const id=`overdue-${po}`;if(!dismissed.has(id))alerts.push({id,type:"overdue",severity:"critical",po,customer,message:`ETA was ${fmtDate(r["ETA"])} — ${Math.abs(daysDiff(eta))}d overdue`,destination:dest,agent,eta:r["ETA"],etd:r["ETD"]});}
+    if(etd&&status==="In Transit"){const lane=getLaneDays(r["POD"]),days=daysDiff(etd)*-1;if(days>lane){const id=`transit-${po}`;if(!dismissed.has(id))alerts.push({id,type:"transit",severity:"critical",po,customer,message:`On water ${days}d — lane avg ${lane}d`,destination:dest,agent,eta:r["ETA"],etd:r["ETD"]});}}
+    if(etd&&active&&status!=="In Transit"&&status!=="Arrived"){const diff=daysDiff(etd);if(diff!==null&&diff>=0&&diff<=WARN_DAYS){const id=`etd-${po}`;if(!dismissed.has(id))alerts.push({id,type:"etd",severity:"warning",po,customer,message:`ETD ${fmtDate(r["ETD"])} — ${diff===0?"today":diff===1?"tomorrow":`in ${diff}d`}. Not yet shipped.`,destination:dest,agent,eta:r["ETA"],etd:r["ETD"]});}}
+    if(eta&&status==="In Transit"){const diff=daysDiff(eta);if(diff!==null&&diff>=0&&diff<=WARN_DAYS){const id=`eta-${po}`;if(!dismissed.has(id))alerts.push({id,type:"eta",severity:"warning",po,customer,message:`ETA ${fmtDate(r["ETA"])} — arriving ${diff===0?"today":diff===1?"tomorrow":`in ${diff}d`}`,destination:dest,agent,eta:r["ETA"],etd:r["ETD"]});}}
+    if(mabd&&eta&&active){const buf=daysDiff(mabd)-daysDiff(eta);if(buf>=0&&buf<=7){const id=`mabd-${po}`;if(!dismissed.has(id))alerts.push({id,type:"mabd",severity:"warning",po,customer,message:`MABD ${fmtDate(r["MABD"])} — only ${buf}d buffer after ETA`,destination:dest,agent,eta:r["ETA"],etd:r["ETD"]});}}
+  });
+  alerts.sort((a,b)=>({critical:0,warning:1}[a.severity]??2)-({critical:0,warning:1}[b.severity]??2));
+  return alerts;
+}
+
+const ALERT_META={
+  overdue:{label:"ETA Overdue",color:"#dc2626",icon:"⛔"},
+  transit:{label:"Transit Exceeded",color:"#dc2626",icon:"🚢"},
+  etd:{label:"ETD Approaching",color:"#b45309",icon:"📦"},
+  eta:{label:"ETA Approaching",color:"#b45309",icon:"🛬"},
+  mabd:{label:"MABD at Risk",color:"#7c3aed",icon:"⚠️"},
+};
+
+// ─── PIN SCREEN ───────────────────────────────────────────
+function PinScreen({onAuth}){
+  const [pin,setPin]=useState("");
+  const [err,setErr]=useState(false);
+  function submit(e){e.preventDefault();if(pin===APP_PIN){localStorage.setItem("lqc_auth","1");onAuth();}else{setErr(true);setPin("");}}
+  return(
+    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:V.slate}}>
+      <div style={{background:V.bg,borderRadius:16,padding:"40px 48px",minWidth:320,textAlign:"center",boxShadow:"0 20px 60px rgba(0,0,0,.3)"}}>
+        <div style={{fontSize:13,fontWeight:500,color:V.text2,letterSpacing:".1em",textTransform:"uppercase",marginBottom:4}}>LQC Logistics</div>
+        <div style={{fontSize:22,fontWeight:600,color:V.text,marginBottom:32}}>Shipping Tracker</div>
+        <form onSubmit={submit}>
+          <input type="password" value={pin} onChange={e=>{setPin(e.target.value);setErr(false);}} placeholder="Enter PIN" maxLength={8} style={{width:"100%",fontSize:20,padding:"12px 16px",border:`1px solid ${err?"#dc2626":V.border2}`,borderRadius:8,textAlign:"center",letterSpacing:"0.3em",marginBottom:12,background:V.bg,color:V.text}}/>
+          {err&&<div style={{fontSize:12,color:"#dc2626",marginBottom:12}}>Incorrect PIN. Try again.</div>}
+          <button type="submit" style={{width:"100%",padding:"12px",background:"#b45309",color:"#fff",border:"none",borderRadius:8,fontSize:15,fontWeight:500,cursor:"pointer"}}>Unlock</button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ─── MAIN APP ─────────────────────────────────────────────
+function App(){
+  const [authed,setAuthed]=useState(()=>localStorage.getItem("lqc_auth")==="1");
+  const [data,setData]=useState([]);
+  const [loading,setLoading]=useState(false);
+  const [syncing,setSyncing]=useState(false);
+  const [syncErr,setSyncErr]=useState(false);
+  const [dismissed,setDismissed]=useState(()=>{try{return new Set(JSON.parse(localStorage.getItem("lqc_dismissed")||"[]"));}catch{return new Set();}});
+  const [tab,setTab]=useState("Dashboard");
+  const [bellOpen,setBellOpen]=useState(false);
+  const [editRow,setEditRow]=useState(null);
+  const [alertTypeFilter,setAlertTypeFilter]=useState("All");
+  const [selected,setSelected]=useState(new Set());
+  const [bulkStatus,setBulkStatus]=useState("");
+  const [calMonth,setCalMonth]=useState(new Date());
+  const [lastSync,setLastSync]=useState(null);
+
+  // Load data from Google Sheet
+  const loadData=useCallback(async()=>{
+    if(!authed)return;
+    setLoading(true);setSyncErr(false);
+    try{
+      const res=await apiGet("getAll");
+      if(res.shipments){setData(res.shipments);setLastSync(new Date());}
+      else setSyncErr(true);
+    }catch{setSyncErr(true);}
+    setLoading(false);
+  },[authed]);
+
+  useEffect(()=>{if(authed)loadData();},[authed,loadData]);
+  // Auto-refresh every 60s
+  useEffect(()=>{if(!authed)return;const t=setInterval(loadData,60000);return()=>clearInterval(t);},[authed,loadData]);
+
+  const alerts=useMemo(()=>buildAlerts(data,dismissed),[data,dismissed]);
+  const criticalCount=alerts.filter(a=>a.severity==="critical").length;
+
+  function saveDismissed(s){setDismissed(s);localStorage.setItem("lqc_dismissed",JSON.stringify([...s]));}
+  function dismiss(id){saveDismissed(new Set([...dismissed,id]));}
+  function dismissAll(){saveDismissed(new Set([...dismissed,...alerts.map(a=>a.id)]));}
+
+  async function saveRow(row){
+    setSyncing(true);
+    try{await apiPost({action:"save",row});}catch{}
+    setSyncing(false);
+    await loadData();
+  }
+  async function deleteRow(po){
+    setSyncing(true);
+    try{await apiPost({action:"delete",po});}catch{}
+    setSyncing(false);
+    await loadData();
+  }
+  async function quickStatus(po,status){
+    const row=data.find(r=>r["LQC PO#"]===po);
+    if(!row)return;
+    await saveRow({...row,Status:status});
+  }
+  async function applyBulk(){
+    if(!bulkStatus||!selected.size)return;
+    setSyncing(true);
+    const rows=data.filter(r=>selected.has(r["LQC PO#"])).map(r=>({...r,Status:bulkStatus}));
+    try{await apiPost({action:"bulkSave",rows});}catch{}
+    setSyncing(false);
+    setSelected(new Set());setBulkStatus("");
+    await loadData();
+  }
+
+  const toggleSelect=(po)=>setSelected(prev=>{const n=new Set(prev);n.has(po)?n.delete(po):n.add(po);return n;});
+  const toggleAll=(rows)=>setSelected(prev=>prev.size===rows.length&&rows.length>0?new Set():new Set(rows.map(r=>r["LQC PO#"])));
+
+  if(!authed)return<PinScreen onAuth={()=>setAuthed(true)}/>;
+
+  return(
+    <div style={{display:"flex",minHeight:"100vh",fontFamily:"inherit",background:V.bg3,color:V.text}}>
+      {/* Sidebar */}
+      <div style={{width:196,background:V.slate,display:"flex",flexDirection:"column",flexShrink:0,position:"sticky",top:0,height:"100vh",overflowY:"auto"}}>
+        <div style={{padding:"18px 14px 10px",borderBottom:"1px solid rgba(255,255,255,.1)"}}>
+          <div style={{fontSize:10,fontWeight:500,color:"#94a3b8",letterSpacing:".08em",textTransform:"uppercase",marginBottom:3}}>LQC Logistics</div>
+          <div style={{fontSize:14,fontWeight:500,color:"#f8fafc"}}>Shipping Tracker</div>
+          {lastSync&&<div style={{fontSize:9,color:"#64748b",marginTop:3}}>Synced {lastSync.toLocaleTimeString()}</div>}
+        </div>
+        <div style={{padding:"8px 14px",borderBottom:"1px solid rgba(255,255,255,.1)"}}>
+          <button onClick={()=>setBellOpen(o=>!o)} style={{display:"flex",alignItems:"center",gap:8,background:"transparent",border:"none",cursor:"pointer",color:"#cbd5e1",fontSize:13,width:"100%",padding:0}}>
+            <span style={{fontSize:15,position:"relative"}}>
+              🔔
+              {alerts.length>0&&<span style={{position:"absolute",top:-4,right:-6,background:criticalCount>0?"#dc2626":"#b45309",color:"#fff",fontSize:9,fontWeight:700,borderRadius:8,padding:"0 4px",lineHeight:"14px"}}>{alerts.length}</span>}
+            </span>
+            <span>Alerts {criticalCount>0&&<span style={{fontSize:10,color:"#fca5a5"}}>({criticalCount} critical)</span>}</span>
+          </button>
+        </div>
+        {TABS.map(t=>(
+          <button key={t} onClick={()=>{setTab(t);setBellOpen(false);}} style={{display:"block",width:"100%",textAlign:"left",padding:"9px 14px",background:tab===t?"rgba(180,87,9,.35)":"transparent",color:tab===t?"#fcd34d":"#cbd5e1",border:"none",cursor:"pointer",fontSize:13,fontWeight:tab===t?500:400,borderLeft:tab===t?"3px solid #fcd34d":"3px solid transparent"}}>
+            {t==="Alerts"?<span style={{display:"flex",alignItems:"center",gap:6}}>{t}{alerts.length>0&&<span style={{fontSize:10,background:"rgba(180,87,9,.4)",color:"#fcd34d",borderRadius:4,padding:"0 5px"}}>{alerts.length}</span>}</span>:t}
+          </button>
+        ))}
+        <div style={{flex:1}}/>
+        <div style={{padding:"8px 14px",borderBottom:"1px solid rgba(255,255,255,.1)"}}>
+          <button onClick={loadData} disabled={loading||syncing} style={{fontSize:11,padding:"5px 10px",border:"0.5px solid rgba(255,255,255,.2)",borderRadius:4,background:"transparent",cursor:"pointer",color:"#94a3b8",width:"100%"}}>
+            {loading?"Loading…":syncing?"Saving…":"↻ Refresh"}
+          </button>
+        </div>
+        <div style={{padding:"6px 14px",fontSize:10,color:"#64748b"}}>
+          {data.length} shipments
+          {syncErr&&<div style={{color:"#f87171",marginTop:2}}>⚠ Sync error</div>}
+        </div>
+        <div style={{padding:"8px 14px"}}>
+          <button onClick={()=>{localStorage.removeItem("lqc_auth");setAuthed(false);}} style={{fontSize:11,padding:"4px 0",background:"transparent",border:"none",cursor:"pointer",color:"#64748b",width:"100%",textAlign:"left"}}>Sign out</button>
+        </div>
+      </div>
+
+      {/* Bell dropdown */}
+      {bellOpen&&(
+        <div style={{position:"fixed",left:196,top:0,width:370,maxHeight:480,overflowY:"auto",background:V.bg,border:`0.5px solid ${V.border2}`,borderRadius:"0 0 12px 12px",zIndex:200,boxShadow:"0 8px 24px rgba(0,0,0,.15)"}}>
+          <div style={{padding:"10px 14px",borderBottom:`0.5px solid ${V.border}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <span style={{fontSize:13,fontWeight:500}}>Active alerts ({alerts.length})</span>
+            <div style={{display:"flex",gap:8}}>
+              {alerts.length>0&&<button onClick={dismissAll} style={{fontSize:11,padding:"3px 8px",border:`0.5px solid ${V.border2}`,borderRadius:4,background:"transparent",cursor:"pointer",color:V.text2}}>Dismiss all</button>}
+              <button onClick={()=>setBellOpen(false)} style={{fontSize:16,border:"none",background:"transparent",cursor:"pointer",color:V.text2}}>×</button>
+            </div>
+          </div>
+          {alerts.slice(0,8).map(a=>{const m=ALERT_META[a.type];return(
+            <div key={a.id} style={{padding:"10px 14px",borderBottom:`0.5px solid ${V.border}`}}>
+              <div style={{display:"flex",justifyContent:"space-between",gap:8}}>
+                <div>
+                  <div style={{fontSize:11,color:m.color,fontWeight:500,marginBottom:2}}>{m.icon} {m.label}</div>
+                  <div style={{fontSize:12,fontWeight:500}}>{a.customer} — <span style={{fontWeight:400,color:V.text2}}>{a.po}</span></div>
+                  <div style={{fontSize:11,color:V.text2}}>{a.message}</div>
+                </div>
+                <button onClick={()=>dismiss(a.id)} style={{fontSize:14,border:"none",background:"transparent",cursor:"pointer",color:V.text2,flexShrink:0}}>×</button>
+              </div>
+            </div>
+          );})}
+          {alerts.length===0&&<div style={{padding:24,textAlign:"center",fontSize:13,color:V.text2}}>No active alerts</div>}
+        </div>
+      )}
+
+      {/* Content */}
+      <div style={{flex:1,overflow:"auto"}} onClick={()=>bellOpen&&setBellOpen(false)}>
+        {loading&&data.length===0&&<LoadingScreen/>}
+        {(!loading||data.length>0)&&<>
+          {tab==="Dashboard"&&<Dashboard data={data} alerts={alerts} setTab={setTab}/>}
+          {tab==="Shipments"&&<Shipments data={data} alerts={alerts} quickStatus={quickStatus} setEditRow={setEditRow} selected={selected} toggleSelect={toggleSelect} toggleAll={toggleAll} bulkStatus={bulkStatus} setBulkStatus={setBulkStatus} applyBulk={applyBulk} syncing={syncing}/>}
+          {tab==="SKU Search"&&<SKUSearch data={data} alerts={alerts}/>}
+          {tab==="Timeline"&&<Timeline data={data} alerts={alerts}/>}
+          {tab==="Calendar"&&<Calendar data={data} calMonth={calMonth} setCalMonth={setCalMonth} alerts={alerts}/>}
+          {tab==="Alerts"&&<AlertsTab alerts={alerts.filter(a=>alertTypeFilter==="All"||a.type===alertTypeFilter)} allAlerts={alerts} typeFilter={alertTypeFilter} setTypeFilter={setAlertTypeFilter} dismiss={dismiss} dismissAll={dismissAll} dismissed={dismissed} saveDismissed={saveDismissed}/>}
+          {tab==="Analytics"&&<Analytics data={data}/>}
+          {tab==="Manage"&&<Manage data={data} saveRow={saveRow} deleteRow={deleteRow} syncing={syncing}/>}
+        </>}
+      </div>
+
+      {editRow&&<EditModal row={editRow} onSave={async(r)=>{await saveRow(r);setEditRow(null);}} onClose={()=>setEditRow(null)} syncing={syncing}/>}
+      {syncing&&<div style={{position:"fixed",bottom:16,right:16,background:"#b45309",color:"#fff",fontSize:12,padding:"6px 14px",borderRadius:20,fontWeight:500,zIndex:9999}}>Saving to Google Sheet…</div>}
+    </div>
+  );
+}
+
+function LoadingScreen(){
+  return(
+    <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",flexDirection:"column",gap:12,color:V.text2}}>
+      <div style={{fontSize:32}}>⛵</div>
+      <div style={{fontSize:14}}>Loading shipments from Google Sheet…</div>
+    </div>
+  );
+}
+
+// ─── DASHBOARD ────────────────────────────────────────────
+function Dashboard({data,alerts,setTab}){
+  const inTransit=data.filter(r=>r["Status"]==="In Transit").length;
+  const arriving7=data.filter(r=>{const d=parseDate(r["ETA"]);return d&&daysDiff(d)>=0&&daysDiff(d)<=7;}).length;
+  const crit=alerts.filter(a=>a.severity==="critical").length;
+  const byModel={"Direct to Client":0,"US Warehouse":0,"Port Pickup":0};
+  data.forEach(r=>{if(byModel[r["Shipping Model"]]!==undefined)byModel[r["Shipping Model"]]++;});
+  const upcoming=data.filter(r=>{const d=parseDate(r["ETA"]);return d&&daysDiff(d)>=0&&daysDiff(d)<=14;}).sort((a,b)=>new Date(a["ETA"])-new Date(b["ETA"])).slice(0,9);
+  const alertPoSet=new Set(alerts.map(a=>a.po));
+  return(
+    <div style={{padding:24}}>
+      <h2 style={{fontSize:18,fontWeight:500,margin:"0 0 18px"}}>Overview</h2>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:20}}>
+        {[{l:"Total Shipments",v:data.length,c:"#b45309"},{l:"In Transit",v:inTransit,c:"#7c3aed"},{l:"Arriving ≤ 7 days",v:arriving7,c:"#0e7490"},{l:"Active Alerts",v:alerts.length,c:crit>0?"#dc2626":"#b45309",click:()=>setTab("Alerts")}].map(c=>(
+          <div key={c.l} onClick={c.click} style={{background:V.bg,border:`0.5px solid ${V.border}`,borderRadius:12,padding:"14px 18px",borderTop:`3px solid ${c.c}`,cursor:c.click?"pointer":"default"}}>
+            <div style={{fontSize:12,color:V.text2,marginBottom:4}}>{c.l}</div>
+            <div style={{fontSize:28,fontWeight:500,color:c.c}}>{c.v}</div>
+            {c.l==="Active Alerts"&&crit>0&&<div style={{fontSize:11,color:"#dc2626",marginTop:2}}>{crit} critical</div>}
+          </div>
+        ))}
+      </div>
+      {alerts.length>0&&(
+        <div style={{background:"#fef2f2",border:"0.5px solid #fca5a5",borderRadius:8,padding:"10px 14px",marginBottom:18,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <span style={{fontSize:13,color:"#991b1b"}}>⛔ {crit} critical + {alerts.length-crit} warnings active</span>
+          <button onClick={()=>setTab("Alerts")} style={{fontSize:12,padding:"4px 12px",border:"0.5px solid #fca5a5",borderRadius:4,background:"transparent",cursor:"pointer",color:"#991b1b"}}>View all →</button>
+        </div>
+      )}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:16}}>
+        <div style={{background:V.bg,border:`0.5px solid ${V.border}`,borderRadius:12,padding:16}}>
+          <div style={{fontSize:13,fontWeight:500,marginBottom:12}}>Shipping model breakdown</div>
+          {Object.entries(byModel).map(([k,v])=>(
+            <div key={k} style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+              <div style={{width:10,height:10,borderRadius:2,background:MODEL_COLORS[k]}}/>
+              <span style={{fontSize:12,flex:1,color:V.text2}}>{k}</span>
+              <span style={{fontSize:12,fontWeight:500}}>{v}</span>
+              <div style={{width:80,height:6,background:V.bg2,borderRadius:3,overflow:"hidden"}}><div style={{width:`${data.length?Math.round(v/data.length*100):0}%`,height:"100%",background:MODEL_COLORS[k],borderRadius:3}}/></div>
+            </div>
+          ))}
+        </div>
+        <div style={{background:V.bg,border:`0.5px solid ${V.border}`,borderRadius:12,padding:16}}>
+          <div style={{fontSize:13,fontWeight:500,marginBottom:10}}>Recent alerts</div>
+          {alerts.slice(0,5).map(a=>{const m=ALERT_META[a.type];return(<div key={a.id} style={{display:"flex",gap:8,marginBottom:8}}><span>{m.icon}</span><div><div style={{fontSize:12,fontWeight:500}}>{a.customer}</div><div style={{fontSize:11,color:V.text2}}>{a.message}</div></div></div>);})}
+          {alerts.length===0&&<div style={{fontSize:13,color:V.text2}}>No active alerts</div>}
+        </div>
+      </div>
+      <div style={{background:V.bg,border:`0.5px solid ${V.border}`,borderRadius:12,padding:16}}>
+        <div style={{fontSize:13,fontWeight:500,marginBottom:12}}>Arriving next 14 days</div>
+        {upcoming.length===0&&<div style={{fontSize:13,color:V.text2}}>None in this window</div>}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(240px,1fr))",gap:8}}>
+          {upcoming.map(r=>{const d=daysDiff(parseDate(r["ETA"]));const ha=alertPoSet.has(r["LQC PO#"]);return(
+            <div key={r["LQC PO#"]} style={{background:ha?"#fffbeb":V.bg2,borderRadius:8,padding:"10px 12px",border:`0.5px solid ${ha?"#fbbf24":V.border}`}}>
+              <div style={{fontSize:12,fontWeight:500}}>{r["Customer"]}{ha&&<span style={{marginLeft:4,fontSize:10,color:"#b45309"}}>⚠</span>}</div>
+              <div style={{fontSize:11,color:V.text2,marginBottom:4}}>{r["LQC PO#"]}</div>
+              <div style={{display:"flex",justifyContent:"space-between"}}>
+                <span style={{fontSize:11,color:V.text2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:130}}>{r["Destination"]||r["POD"]}</span>
+                <span style={{fontSize:11,fontWeight:500,color:d<=3?"#dc2626":d<=7?"#b45309":"#065f46",whiteSpace:"nowrap",marginLeft:4}}>ETA {fmtDate(r["ETA"])}</span>
+              </div>
+            </div>
+          );})}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── SHIPMENTS ────────────────────────────────────────────
+function Shipments({data,alerts,quickStatus,setEditRow,selected,toggleSelect,toggleAll,bulkStatus,setBulkStatus,applyBulk,syncing}){
+  const [search,setSearch]=useState("");
+  const [fStatus,setFStatus]=useState("All");
+  const [fCustomer,setFCustomer]=useState("All");
+  const [fModel,setFModel]=useState("All");
+  const [fAgent,setFAgent]=useState("All");
+  const [expanded,setExpanded]=useState(null);
+  const customers=["All",...new Set(data.map(r=>r["Customer"]).filter(Boolean))].sort();
+  const agents=["All",...new Set(data.map(r=>r["Agent"]).filter(Boolean))].sort();
+  const alertPoSet=new Set(alerts.map(a=>a.po));
+  const filtered=useMemo(()=>data.filter(r=>{
+    if(fStatus!=="All"&&r["Status"]!==fStatus)return false;
+    if(fCustomer!=="All"&&r["Customer"]!==fCustomer)return false;
+    if(fModel!=="All"&&r["Shipping Model"]!==fModel)return false;
+    if(fAgent!=="All"&&r["Agent"]!==fAgent)return false;
+    if(search){const q=search.toLowerCase();const skus=Array.isArray(r["SKUs"])?r["SKUs"].map(s=>s.sku).join(" "):String(r["SKUs"]||"");return[r["LQC PO#"],r["Customer"],r["Customer PO"],r["Destination"],r["POD"],r["Container #"],r["BOL #"],skus].some(v=>String(v||"").toLowerCase().includes(q));}
+    return true;
+  }),[data,fStatus,fCustomer,fModel,fAgent,search]);
+  const sel={fontSize:12,padding:"5px 8px",border:`0.5px solid ${V.border2}`,borderRadius:6,background:V.bg,color:V.text};
+  return(
+    <div style={{padding:24}}>
+      <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap",alignItems:"center"}}>
+        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search PO, customer, SKU, container, BOL…" style={{flex:1,minWidth:180,fontSize:13,padding:"6px 10px",border:`0.5px solid ${V.border2}`,borderRadius:6,background:V.bg,color:V.text}}/>
+        <select value={fStatus} onChange={e=>setFStatus(e.target.value)} style={sel}><option>All</option>{STATUSES.map(s=><option key={s}>{s}</option>)}</select>
+        <select value={fCustomer} onChange={e=>setFCustomer(e.target.value)} style={sel}>{customers.map(s=><option key={s}>{s}</option>)}</select>
+        <select value={fModel} onChange={e=>setFModel(e.target.value)} style={sel}>{["All","Direct to Client","US Warehouse","Port Pickup"].map(s=><option key={s}>{s}</option>)}</select>
+        <select value={fAgent} onChange={e=>setFAgent(e.target.value)} style={sel}>{agents.map(s=><option key={s}>{s}</option>)}</select>
+        <span style={{fontSize:12,color:V.text2}}>{filtered.length} results</span>
+      </div>
+      {selected.size>0&&(
+        <div style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",background:"#eff6ff",border:"0.5px solid #93c5fd",borderRadius:8,marginBottom:10}}>
+          <span style={{fontSize:12,fontWeight:500,color:"#1d4ed8"}}>{selected.size} selected</span>
+          <select value={bulkStatus} onChange={e=>setBulkStatus(e.target.value)} style={{...sel,fontSize:12}}><option value="">Set status…</option>{STATUSES.map(s=><option key={s}>{s}</option>)}</select>
+          <button onClick={applyBulk} disabled={!bulkStatus||syncing} style={{fontSize:12,padding:"4px 12px",border:"none",borderRadius:4,background:bulkStatus?"#1d4ed8":"#93c5fd",color:"#fff",cursor:bulkStatus?"pointer":"default"}}>{syncing?"Saving…":"Apply"}</button>
+          <button onClick={()=>toggleAll([])} style={{fontSize:12,padding:"4px 10px",border:"0.5px solid #93c5fd",borderRadius:4,background:"transparent",cursor:"pointer",color:"#1d4ed8"}}>Clear</button>
+        </div>
+      )}
+      <div style={{border:`0.5px solid ${V.border}`,borderRadius:12,overflow:"hidden",background:V.bg}}>
+        <div style={{overflowX:"auto"}}>
+          <table style={{width:"100%",borderCollapse:"collapse",minWidth:900}}>
+            <thead>
+              <tr style={{background:V.bg2,fontSize:11,color:V.text2}}>
+                <th style={{padding:"8px 8px",width:32}}><input type="checkbox" onChange={()=>toggleAll(filtered)} checked={selected.size===filtered.length&&filtered.length>0} style={{cursor:"pointer"}}/></th>
+                {["LQC PO#","Customer","Cust. PO","ETD","ETA","Destination","Agent","Model","Status",""].map((h,i)=>(
+                  <th key={i} style={{padding:"8px 8px",textAlign:"left",fontWeight:500,borderBottom:`0.5px solid ${V.border}`}}>{h}</th>
+                ))}
+                <th style={{padding:"8px 8px",width:52}}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((r,i)=>{
+                const po=r["LQC PO#"];
+                const isExp=expanded===po;
+                const eta=parseDate(r["ETA"]);
+                const ha=alertPoSet.has(po);
+                const etaColor=eta&&r["Status"]==="In Transit"?(daysDiff(eta)<0?"#dc2626":daysDiff(eta)<=3?"#b45309":V.text):V.text;
+                const skus=Array.isArray(r["SKUs"])?r["SKUs"]:[];
+                return(
+                  <React.Fragment key={po}>
+                    <tr style={{borderBottom:`0.5px solid ${V.border}`,background:isExp?V.bg2:ha?"rgba(251,191,36,.06)":i%2===0?V.bg:"rgba(0,0,0,.01)"}}>
+                      <td style={{padding:"6px 8px"}} onClick={e=>e.stopPropagation()}><input type="checkbox" checked={selected.has(po)} onChange={()=>toggleSelect(po)} style={{cursor:"pointer"}}/></td>
+                      <td style={{padding:"6px 8px",fontSize:12,fontWeight:500,whiteSpace:"nowrap",cursor:"pointer"}} onClick={()=>setExpanded(isExp?null:po)}>{ha&&<span style={{marginRight:3,fontSize:10}}>⚠</span>}{po}</td>
+                      <td style={{padding:"6px 8px",fontSize:12,whiteSpace:"nowrap",cursor:"pointer"}} onClick={()=>setExpanded(isExp?null:po)}>{r["Customer"]}</td>
+                      <td style={{padding:"6px 8px",fontSize:12,color:V.text2,whiteSpace:"nowrap",cursor:"pointer"}} onClick={()=>setExpanded(isExp?null:po)}>{r["Customer PO"]||"—"}</td>
+                      <td style={{padding:"6px 8px",fontSize:12,whiteSpace:"nowrap",cursor:"pointer"}} onClick={()=>setExpanded(isExp?null:po)}>{fmtDate(r["ETD"])}</td>
+                      <td style={{padding:"6px 8px",fontSize:12,color:etaColor,fontWeight:eta&&daysDiff(eta)<0&&r["Status"]==="In Transit"?500:400,whiteSpace:"nowrap",cursor:"pointer"}} onClick={()=>setExpanded(isExp?null:po)}>{fmtDate(r["ETA"])}</td>
+                      <td style={{padding:"6px 8px",fontSize:12,color:V.text2,maxWidth:130,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",cursor:"pointer"}} onClick={()=>setExpanded(isExp?null:po)}>{r["Destination"]||r["POD"]||"—"}</td>
+                      <td style={{padding:"6px 8px",fontSize:12,color:V.text2,whiteSpace:"nowrap",cursor:"pointer"}} onClick={()=>setExpanded(isExp?null:po)}>{r["Agent"]||"—"}</td>
+                      <td style={{padding:"6px 8px",fontSize:11,cursor:"pointer"}} onClick={()=>setExpanded(isExp?null:po)}><span style={{background:`${MODEL_COLORS[r["Shipping Model"]]||"#64748b"}22`,color:MODEL_COLORS[r["Shipping Model"]]||"#64748b",padding:"2px 5px",borderRadius:4,whiteSpace:"nowrap",fontSize:10}}>{r["Shipping Model"]}</span></td>
+                      <td style={{padding:"4px 6px"}} onClick={e=>e.stopPropagation()}>
+                        <select value={r["Status"]} onChange={e=>quickStatus(po,e.target.value)} style={{fontSize:11,padding:"3px 4px",border:`0.5px solid ${V.border2}`,borderRadius:4,background:V.bg,color:STATUS_COLORS[r["Status"]]||V.text,cursor:"pointer",maxWidth:110}}>
+                          {STATUSES.map(s=><option key={s} value={s}>{s}</option>)}
+                        </select>
+                      </td>
+                      <td style={{padding:"4px 6px",textAlign:"center"}} onClick={e=>e.stopPropagation()}>
+                        <button onClick={()=>setEditRow(r)} style={{fontSize:11,padding:"3px 8px",border:`0.5px solid ${V.border2}`,borderRadius:4,background:"transparent",cursor:"pointer",color:V.text2}}>Edit</button>
+                      </td>
+                    </tr>
+                    {isExp&&(
+                      <tr key={po+"_exp"}>
+                        <td colSpan={12} style={{padding:"12px 16px",background:V.bg2,borderBottom:`0.5px solid ${V.border}`}}>
+                          <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:10}}>
+                            {[["Container #",r["Container #"]],["BOL #",r["BOL #"]],["O/F",r["O/F"]],["Volume",r["Volume"]],["MABD",fmtDate(r["MABD"])],["Invoice #",r["Invoice #"]],["POD",r["POD"]],["Note",r["Note"]]].map(([l,v])=>(
+                              <div key={l}><div style={{fontSize:10,color:V.text2}}>{l}</div><div style={{fontSize:12}}>{v||"—"}</div></div>
+                            ))}
+                          </div>
+                          <div style={{fontSize:11,fontWeight:500,color:V.text2,marginBottom:5}}>SKUs ({skus.length})</div>
+                          {skus.map((s,si)=>(
+                            <div key={si} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"3px 0",borderBottom:`0.5px solid ${V.border}`}}>
+                              <span>{s.sku}</span><span style={{color:V.text2,whiteSpace:"nowrap",marginLeft:8}}>{Number(s.qty||0).toLocaleString()} {s.unit}</span>
+                            </div>
+                          ))}
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        {filtered.length===0&&<div style={{padding:32,textAlign:"center",color:V.text2,fontSize:13}}>No shipments match your filters</div>}
+      </div>
+    </div>
+  );
+}
+
+// ─── SKU SEARCH ───────────────────────────────────────────
+function SKUSearch({data,alerts}){
+  const [q,setQ]=useState("");
+  const alertPoSet=new Set(alerts.map(a=>a.po));
+  const allSkus=useMemo(()=>{
+    const map={};
+    data.forEach(r=>{
+      const skus=Array.isArray(r["SKUs"])?r["SKUs"]:[];
+      skus.forEach(s=>{
+        if(!map[s.sku])map[s.sku]=[];
+        map[s.sku].push({...r,matchSku:s});
+      });
+    });
+    return map;
+  },[data]);
+  const results=useMemo(()=>{
+    if(!q||q.length<2)return[];
+    const ql=q.toLowerCase();
+    return Object.entries(allSkus).filter(([k])=>k.toLowerCase().includes(ql)).sort((a,b)=>a[0].localeCompare(b[0]));
+  },[q,allSkus]);
+  return(
+    <div style={{padding:24}}>
+      <h2 style={{fontSize:18,fontWeight:500,margin:"0 0 6px"}}>SKU / Product search</h2>
+      <div style={{fontSize:12,color:V.text2,marginBottom:16}}>Search any product to see all shipments containing it.</div>
+      <input value={q} onChange={e=>setQ(e.target.value)} placeholder="e.g. 'Coconut Water', 'Virgin Coconut Oil', 'Flour'…" autoFocus style={{width:"100%",fontSize:14,padding:"10px 14px",border:`0.5px solid ${V.border2}`,borderRadius:8,background:V.bg,color:V.text,marginBottom:20}}/>
+      {q.length>=2&&results.length===0&&<div style={{textAlign:"center",padding:"40px 0",color:V.text2,fontSize:13}}>No products found matching "{q}"</div>}
+      {results.map(([skuName,rows])=>{
+        const totalQty=rows.reduce((s,r)=>s+Number(r.matchSku.qty||0),0);
+        return(
+          <div key={skuName} style={{background:V.bg,border:`0.5px solid ${V.border}`,borderRadius:12,marginBottom:16,overflow:"hidden"}}>
+            <div style={{padding:"12px 16px",background:V.bg2,borderBottom:`0.5px solid ${V.border}`,display:"flex",justifyContent:"space-between"}}>
+              <div>
+                <div style={{fontSize:13,fontWeight:500,marginBottom:2}}>{skuName}</div>
+                <div style={{fontSize:11,color:V.text2}}>{rows.length} shipment{rows.length!==1?"s":""} · {totalQty.toLocaleString()} {rows[0].matchSku.unit} total</div>
+              </div>
+            </div>
+            <div style={{overflowX:"auto"}}>
+              <table style={{width:"100%",borderCollapse:"collapse",minWidth:600}}>
+                <thead><tr style={{fontSize:11,color:V.text2,background:V.bg2}}>
+                  {["LQC PO#","Customer","Qty","ETD","ETA","Destination","Status"].map(h=><th key={h} style={{padding:"6px 12px",textAlign:"left",fontWeight:500,borderBottom:`0.5px solid ${V.border}`}}>{h}</th>)}
+                </tr></thead>
+                <tbody>
+                  {rows.map((r,i)=>{
+                    const eta=parseDate(r["ETA"]);
+                    const ha=alertPoSet.has(r["LQC PO#"]);
+                    const etaColor=eta&&r["Status"]==="In Transit"?(daysDiff(eta)<0?"#dc2626":daysDiff(eta)<=3?"#b45309":V.text):V.text;
+                    return(
+                      <tr key={r["LQC PO#"]+i} style={{borderBottom:`0.5px solid ${V.border}`,background:ha?"rgba(251,191,36,.05)":i%2===0?V.bg:"rgba(0,0,0,.01)"}}>
+                        <td style={{padding:"6px 12px",fontSize:12}}>{ha&&<span style={{marginRight:3,fontSize:10}}>⚠</span>}{r["LQC PO#"]}</td>
+                        <td style={{padding:"6px 12px",fontSize:12}}>{r["Customer"]}</td>
+                        <td style={{padding:"6px 12px",fontSize:12,fontWeight:500}}>{Number(r.matchSku.qty||0).toLocaleString()}</td>
+                        <td style={{padding:"6px 12px",fontSize:12}}>{fmtDate(r["ETD"])}</td>
+                        <td style={{padding:"6px 12px",fontSize:12,color:etaColor,fontWeight:500}}>{fmtDate(r["ETA"])}</td>
+                        <td style={{padding:"6px 12px",fontSize:12,color:V.text2}}>{r["Destination"]||r["POD"]||"—"}</td>
+                        <td style={{padding:"6px 12px",fontSize:11}}><span style={{background:`${STATUS_COLORS[r["Status"]]}22`,color:STATUS_COLORS[r["Status"]],padding:"2px 6px",borderRadius:4}}>{r["Status"]}</span></td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      })}
+      {q.length<2&&<div style={{textAlign:"center",padding:"40px 0",color:V.text2}}><div style={{fontSize:32,marginBottom:8}}>🔍</div><div style={{fontSize:13}}>Type at least 2 characters to search</div></div>}
+    </div>
+  );
+}
+
+// ─── TIMELINE ─────────────────────────────────────────────
+function Timeline({data,alerts}){
+  const [fCustomer,setFCustomer]=useState("All");
+  const [fStatus,setFStatus]=useState("All");
+  const customers=["All",...new Set(data.map(r=>r["Customer"]).filter(Boolean))].sort();
+  const alertPoSet=new Set(alerts.map(a=>a.po));
+  const rows=useMemo(()=>data.filter(r=>{
+    if(fCustomer!=="All"&&r["Customer"]!==fCustomer)return false;
+    if(fStatus!=="All"&&r["Status"]!==fStatus)return false;
+    return parseDate(r["ETD"])||parseDate(r["ETA"]);
+  }).sort((a,b)=>new Date(a["ETD"]||a["ETA"])-new Date(b["ETD"]||b["ETA"])),[data,fCustomer,fStatus]);
+  const allDates=rows.flatMap(r=>[parseDate(r["ETD"]),parseDate(r["ETA"])].filter(Boolean));
+  const minD=allDates.length?new Date(Math.min(...allDates)):new Date();
+  const maxD=allDates.length?new Date(Math.max(...allDates)):new Date();
+  const totalDays=Math.max((maxD-minD)/86400000,1);
+  const pct=d=>d?Math.max(0,Math.min(100,Math.round((d-minD)/86400000/totalDays*100))):null;
+  const todayPct=pct(today);
+  const sel={fontSize:12,padding:"5px 8px",border:`0.5px solid ${V.border2}`,borderRadius:6,background:V.bg,color:V.text};
+  return(
+    <div style={{padding:24}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+        <h2 style={{fontSize:18,fontWeight:500,margin:0}}>Shipment timeline</h2>
+        <div style={{display:"flex",gap:8}}>
+          <select value={fCustomer} onChange={e=>setFCustomer(e.target.value)} style={sel}>{customers.map(c=><option key={c}>{c}</option>)}</select>
+          <select value={fStatus} onChange={e=>setFStatus(e.target.value)} style={sel}><option>All</option>{STATUSES.map(s=><option key={s}>{s}</option>)}</select>
+        </div>
+      </div>
+      <div style={{display:"flex",gap:12,marginBottom:10,fontSize:11,color:V.text2}}>
+        <span><span style={{display:"inline-block",width:12,height:8,borderRadius:2,background:"#7c3aed",marginRight:4}}/>In Transit</span>
+        <span><span style={{display:"inline-block",width:12,height:8,borderRadius:2,background:"#065f46",marginRight:4}}/>Delivered/Arrived</span>
+        <span><span style={{display:"inline-block",width:12,height:8,borderRadius:2,background:"#0e7490",marginRight:4}}/>Other</span>
+        <span><span style={{display:"inline-block",width:2,height:12,background:"#dc2626",marginRight:4}}/>Today</span>
+      </div>
+      <div style={{background:V.bg,border:`0.5px solid ${V.border}`,borderRadius:12,overflow:"hidden"}}>
+        <div style={{display:"flex",borderBottom:`0.5px solid ${V.border}`,background:V.bg2}}>
+          <div style={{width:220,flexShrink:0,padding:"6px 12px",fontSize:11,color:V.text2,fontWeight:500}}>Shipment</div>
+          <div style={{flex:1,position:"relative",height:28}}>
+            {[0,25,50,75,100].map(p=>{const d=new Date(minD.getTime()+p/100*totalDays*86400000);return<span key={p} style={{position:"absolute",left:`${p}%`,fontSize:9,color:V.text2,transform:"translateX(-50%)",top:8,whiteSpace:"nowrap"}}>{d.toLocaleDateString("en-US",{month:"short",year:"2-digit"})}</span>;})}</div>
+        </div>
+        <div style={{maxHeight:480,overflowY:"auto"}}>
+          {rows.map((r,i)=>{
+            const etd=parseDate(r["ETD"]),eta=parseDate(r["ETA"]);
+            const p1=pct(etd),p2=pct(eta);
+            const ha=alertPoSet.has(r["LQC PO#"]);
+            const barColor=["Delivered","Arrived"].includes(r["Status"])?"#065f46":r["Status"]==="In Transit"?"#7c3aed":"#0e7490";
+            const left=Math.min(p1??p2??0,p2??p1??0),right=Math.max(p1??p2??0,p2??p1??0);
+            return(
+              <div key={r["LQC PO#"]} style={{display:"flex",borderBottom:`0.5px solid ${V.border}`,background:ha?"rgba(251,191,36,.04)":i%2===0?V.bg:"rgba(0,0,0,.01)",minHeight:32,alignItems:"center"}}>
+                <div style={{width:220,flexShrink:0,padding:"4px 12px",overflow:"hidden"}}>
+                  <div style={{fontSize:11,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ha&&<span style={{marginRight:2,fontSize:9}}>⚠</span>}{r["Customer"]}</div>
+                  <div style={{fontSize:10,color:V.text2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r["LQC PO#"]}</div>
+                </div>
+                <div style={{flex:1,position:"relative",height:32,display:"flex",alignItems:"center"}}>
+                  <div style={{position:"absolute",left:`${left}%`,width:`${Math.max(right-left,1)}%`,height:14,background:barColor,borderRadius:3,opacity:.85}}/>
+                  {p1!==null&&<div style={{position:"absolute",left:`${p1}%`,width:6,height:6,background:"#b45309",borderRadius:"50%",transform:"translateX(-50%)"}}/>}
+                  {p2!==null&&<div style={{position:"absolute",left:`${p2}%`,width:6,height:6,background:"#059669",borderRadius:"50%",transform:"translateX(-50%)"}}/>}
+                  {todayPct!==null&&todayPct>=0&&todayPct<=100&&<div style={{position:"absolute",left:`${todayPct}%`,top:0,bottom:0,width:2,background:"#dc2626",opacity:.7}}/>}
+                  <div style={{position:"absolute",right:6,fontSize:9,color:STATUS_COLORS[r["Status"]]||V.text2,background:`${STATUS_COLORS[r["Status"]]}15`,padding:"1px 5px",borderRadius:3,whiteSpace:"nowrap"}}>{r["Status"]}</div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+      {rows.length===0&&<div style={{textAlign:"center",padding:"40px 0",color:V.text2,fontSize:13}}>No shipments with dates match your filters</div>}
+    </div>
+  );
+}
+
+// ─── CALENDAR ─────────────────────────────────────────────
+function Calendar({data,calMonth,setCalMonth,alerts}){
+  const year=calMonth.getFullYear(),month=calMonth.getMonth();
+  const firstDay=new Date(year,month,1).getDay();
+  const daysInMonth=new Date(year,month+1,0).getDate();
+  const alertEtaDays=new Set(alerts.map(a=>{const d=parseDate(a.eta);return d&&d.getFullYear()===year&&d.getMonth()===month?d.getDate():null}).filter(Boolean));
+  const etdMap={},etaMap={};
+  data.forEach(r=>{
+    if(r["ETD"]){const d=new Date(r["ETD"]);if(d.getFullYear()===year&&d.getMonth()===month){const k=d.getDate();if(!etdMap[k])etdMap[k]=[];etdMap[k].push(r);}}
+    if(r["ETA"]){const d=new Date(r["ETA"]);if(d.getFullYear()===year&&d.getMonth()===month){const k=d.getDate();if(!etaMap[k])etaMap[k]=[];etaMap[k].push(r);}}
+  });
+  const cells=[];
+  for(let i=0;i<firstDay;i++)cells.push(null);
+  for(let d=1;d<=daysInMonth;d++)cells.push(d);
+  return(
+    <div style={{padding:24}}>
+      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:14}}>
+        <button onClick={()=>setCalMonth(new Date(year,month-1,1))} style={{padding:"4px 12px",border:`0.5px solid ${V.border2}`,borderRadius:6,background:"transparent",cursor:"pointer",color:V.text}}>←</button>
+        <span style={{fontSize:16,fontWeight:500,flex:1,textAlign:"center"}}>{calMonth.toLocaleDateString("en-US",{month:"long",year:"numeric"})}</span>
+        <button onClick={()=>setCalMonth(new Date(year,month+1,1))} style={{padding:"4px 12px",border:`0.5px solid ${V.border2}`,borderRadius:6,background:"transparent",cursor:"pointer",color:V.text}}>→</button>
+      </div>
+      <div style={{display:"flex",gap:16,marginBottom:10,fontSize:11,flexWrap:"wrap",color:V.text2}}>
+        <span><span style={{display:"inline-block",width:10,height:10,borderRadius:2,background:"#b45309",marginRight:4}}/>ETD</span>
+        <span><span style={{display:"inline-block",width:10,height:10,borderRadius:2,background:"#0e7490",marginRight:4}}/>ETA</span>
+        <span><span style={{display:"inline-block",width:10,height:10,borderRadius:2,background:"#dc2626",marginRight:4}}/>Alert day</span>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:3}}>
+        {["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map(d=><div key={d} style={{textAlign:"center",fontSize:11,fontWeight:500,color:V.text2,padding:"4px 0"}}>{d}</div>)}
+        {cells.map((d,i)=>{
+          if(!d)return<div key={`e${i}`}/>;
+          const etds=etdMap[d]||[],etas=etaMap[d]||[];
+          const isToday=today.getDate()===d&&today.getMonth()===month&&today.getFullYear()===year;
+          const hasAlert=alertEtaDays.has(d);
+          return(
+            <div key={d} style={{minHeight:76,background:isToday?"rgba(180,87,9,.06)":hasAlert?"rgba(220,38,38,.04)":V.bg,border:`${hasAlert||isToday?"1px":"0.5px"} solid ${isToday?"#b45309":hasAlert?"#dc2626":V.border}`,borderRadius:8,padding:"4px 3px",position:"relative"}}>
+              <div style={{fontSize:11,fontWeight:isToday?700:400,color:isToday?"#b45309":hasAlert?"#dc2626":V.text2,marginBottom:2,textAlign:"center"}}>{d}</div>
+              {etds.slice(0,2).map((r,j)=><div key={j} title={r["LQC PO#"]} style={{fontSize:9,background:"#fef3c7",color:"#78350f",borderRadius:2,padding:"1px 3px",marginBottom:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",borderLeft:"2px solid #b45309"}}>↑ {r["Customer"]}</div>)}
+              {etds.length>2&&<div style={{fontSize:9,color:"#b45309",fontWeight:500}}>+{etds.length-2} ETD</div>}
+              {etas.slice(0,2).map((r,j)=><div key={j} title={r["LQC PO#"]} style={{fontSize:9,background:hasAlert?"#fee2e2":"#e0f2fe",color:hasAlert?"#991b1b":"#0c4a6e",borderRadius:2,padding:"1px 3px",marginBottom:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",borderLeft:`2px solid ${hasAlert?"#dc2626":"#0e7490"}`}}>↓ {r["Customer"]}</div>)}
+              {etas.length>2&&<div style={{fontSize:9,color:"#0e7490",fontWeight:500}}>+{etas.length-2} ETA</div>}
+              {hasAlert&&<div style={{position:"absolute",top:2,right:3,fontSize:8,color:"#dc2626"}}>⚠</div>}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── ALERTS TAB ───────────────────────────────────────────
+function AlertsTab({alerts,allAlerts,typeFilter,setTypeFilter,dismiss,dismissAll,dismissed,saveDismissed}){
+  const crits=alerts.filter(a=>a.severity==="critical");
+  const warns=alerts.filter(a=>a.severity==="warning");
+  const types=["All","overdue","transit","etd","eta","mabd"];
+  return(
+    <div style={{padding:24}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+        <div><h2 style={{fontSize:18,fontWeight:500,margin:"0 0 3px"}}>Alert center</h2><div style={{fontSize:12,color:V.text2}}>Warn threshold: {WARN_DAYS} days · {today.toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric",year:"numeric"})}</div></div>
+        {alerts.length>0&&<button onClick={dismissAll} style={{fontSize:12,padding:"6px 14px",border:`0.5px solid ${V.border2}`,borderRadius:6,background:"transparent",cursor:"pointer",color:V.text}}>Dismiss all visible</button>}
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:10,marginBottom:16}}>
+        {[{l:"ETA Overdue",t:"overdue",c:"#dc2626"},{l:"Transit Exceeded",t:"transit",c:"#dc2626"},{l:"ETD Approaching",t:"etd",c:"#b45309"},{l:"ETA Approaching",t:"eta",c:"#b45309"},{l:"MABD at Risk",t:"mabd",c:"#7c3aed"}].map(c=>{
+          const count=allAlerts.filter(a=>a.type===c.t).length;
+          return<button key={c.t} onClick={()=>setTypeFilter(typeFilter===c.t?"All":c.t)} style={{background:typeFilter===c.t?`${c.c}15`:V.bg,border:`0.5px solid ${typeFilter===c.t?c.c:V.border}`,borderRadius:8,padding:"10px 12px",cursor:"pointer",textAlign:"left"}}>
+            <div style={{fontSize:20,fontWeight:500,color:count>0?c.c:V.text2}}>{count}</div>
+            <div style={{fontSize:11,color:V.text2,marginTop:2}}>{c.l}</div>
+          </button>;
+        })}
+      </div>
+      <div style={{display:"flex",gap:6,marginBottom:16,flexWrap:"wrap"}}>
+        {types.map(t=><button key={t} onClick={()=>setTypeFilter(t)} style={{fontSize:11,padding:"4px 10px",border:`0.5px solid ${typeFilter===t?"#b45309":V.border}`,borderRadius:20,background:typeFilter===t?"#b45309":"transparent",color:typeFilter===t?"#fff":V.text2,cursor:"pointer"}}>{t==="All"?`All (${alerts.length})`:ALERT_META[t]?.label+` (${alerts.filter(a=>a.type===t).length})`}</button>)}
+      </div>
+      {crits.length>0&&<div style={{marginBottom:16}}><div style={{fontSize:12,fontWeight:500,color:"#dc2626",marginBottom:8}}>⛔ Critical</div><div style={{display:"flex",flexDirection:"column",gap:8}}>{crits.map(a=><AlertCard key={a.id} a={a} dismiss={dismiss}/>)}</div></div>}
+      {warns.length>0&&<div style={{marginBottom:16}}><div style={{fontSize:12,fontWeight:500,color:"#b45309",marginBottom:8}}>⚠ Warnings</div><div style={{display:"flex",flexDirection:"column",gap:8}}>{warns.map(a=><AlertCard key={a.id} a={a} dismiss={dismiss}/>)}</div></div>}
+      {alerts.length===0&&<div style={{textAlign:"center",padding:"60px 0",color:V.text2}}><div style={{fontSize:32,marginBottom:12}}>✅</div><div style={{fontSize:14,fontWeight:500}}>No active alerts</div>{dismissed.size>0&&<button onClick={()=>saveDismissed(new Set())} style={{marginTop:12,fontSize:12,padding:"5px 12px",border:`0.5px solid ${V.border2}`,borderRadius:6,background:"transparent",cursor:"pointer",color:V.text2}}>Restore {dismissed.size} dismissed</button>}</div>}
+    </div>
+  );
+}
+function AlertCard({a,dismiss}){
+  const m=ALERT_META[a.type];
+  return(
+    <div style={{background:V.bg,border:`0.5px solid ${m.color}44`,borderLeft:`3px solid ${m.color}`,borderRadius:8,padding:"12px 14px",display:"flex",gap:12}}>
+      <span style={{fontSize:18,flexShrink:0}}>{m.icon}</span>
+      <div style={{flex:1}}>
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+          <span style={{fontSize:11,fontWeight:500,color:m.color,textTransform:"uppercase",letterSpacing:".04em"}}>{m.label}</span>
+          <button onClick={()=>dismiss(a.id)} style={{fontSize:14,border:"none",background:"transparent",cursor:"pointer",color:V.text2}}>×</button>
+        </div>
+        <div style={{fontSize:13,fontWeight:500,marginBottom:3}}>{a.customer} — <span style={{fontWeight:400,color:V.text2}}>{a.po}</span></div>
+        <div style={{fontSize:12,marginBottom:4}}>{a.message}</div>
+        <div style={{display:"flex",gap:14,fontSize:11,color:V.text2}}>
+          {a.destination&&<span>→ {a.destination}</span>}
+          {a.agent&&<span>via {a.agent}</span>}
+          {a.etd&&<span>ETD: {fmtDate(a.etd)}</span>}
+          {a.eta&&<span>ETA: {fmtDate(a.eta)}</span>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── ANALYTICS ────────────────────────────────────────────
+function Analytics({data}){
+  const [fC,setFC]=useState("All");const [fM,setFM]=useState("All");const [df,setDF]=useState("");const [dt,setDT]=useState("");
+  const customers=["All",...new Set(data.map(r=>r["Customer"]).filter(Boolean))].sort();
+  const f=useMemo(()=>data.filter(r=>{
+    if(fC!=="All"&&r["Customer"]!==fC)return false;
+    if(fM!=="All"&&r["Shipping Model"]!==fM)return false;
+    if(df){const d=parseDate(r["ETD"]);if(!d||d<new Date(df))return false;}
+    if(dt){const d=parseDate(r["ETD"]);if(!d||d>new Date(dt))return false;}
+    return true;
+  }),[data,fC,fM,df,dt]);
+  const byModel={},byStatus={},byAgent={},byCustomer={},byMonth={};
+  f.forEach(r=>{
+    byModel[r["Shipping Model"]]=(byModel[r["Shipping Model"]]||0)+1;
+    byStatus[r["Status"]]=(byStatus[r["Status"]]||0)+1;
+    byAgent[r["Agent"]]=(byAgent[r["Agent"]]||0)+1;
+    byCustomer[r["Customer"]]=(byCustomer[r["Customer"]]||0)+1;
+    if(r["ETD"]){const d=new Date(r["ETD"]);const k=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;byMonth[k]=(byMonth[k]||0)+1;}
+  });
+  const months=Object.keys(byMonth).sort();
+  const maxM=Math.max(...Object.values(byMonth),1);
+  const topC=Object.entries(byCustomer).sort((a,b)=>b[1]-a[1]).slice(0,10);
+  const topA=Object.entries(byAgent).sort((a,b)=>b[1]-a[1]).slice(0,8);
+  const total=f.length||1;
+  const sel={fontSize:12,padding:"5px 8px",border:`0.5px solid ${V.border2}`,borderRadius:6,background:V.bg,color:V.text};
+  return(
+    <div style={{padding:24}}>
+      <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap",alignItems:"center"}}>
+        <select value={fC} onChange={e=>setFC(e.target.value)} style={sel}>{customers.map(c=><option key={c}>{c}</option>)}</select>
+        <select value={fM} onChange={e=>setFM(e.target.value)} style={sel}>{["All","Direct to Client","US Warehouse","Port Pickup"].map(m=><option key={m}>{m}</option>)}</select>
+        <input type="date" value={df} onChange={e=>setDF(e.target.value)} style={sel}/>
+        <span style={{fontSize:12,color:V.text2}}>to</span>
+        <input type="date" value={dt} onChange={e=>setDT(e.target.value)} style={sel}/>
+        <span style={{fontSize:12,color:V.text2}}>{f.length} shipments</span>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:14}}>
+        {[["Shipping model",Object.entries(MODEL_COLORS),byModel],["Status",Object.entries(STATUS_COLORS),byStatus]].map(([title,pairs,map])=>(
+          <div key={title} style={{background:V.bg,border:`0.5px solid ${V.border}`,borderRadius:12,padding:16}}>
+            <div style={{fontSize:13,fontWeight:500,marginBottom:12}}>{title}</div>
+            {pairs.map(([k,c])=>{const v=map[k]||0;return(
+              <div key={k} style={{display:"flex",alignItems:"center",gap:8,marginBottom:7}}>
+                <div style={{width:10,height:10,borderRadius:2,background:c}}/>
+                <span style={{fontSize:12,flex:1,color:V.text2}}>{k}</span>
+                <span style={{fontSize:12,fontWeight:500}}>{v}</span>
+                <div style={{width:70,height:6,background:V.bg2,borderRadius:3,overflow:"hidden"}}><div style={{width:`${Math.round(v/total*100)}%`,height:"100%",background:c,borderRadius:3}}/></div>
+                <span style={{fontSize:10,color:V.text2,width:26,textAlign:"right"}}>{Math.round(v/total*100)}%</span>
+              </div>
+            );})}
+          </div>
+        ))}
+      </div>
+      <div style={{background:V.bg,border:`0.5px solid ${V.border}`,borderRadius:12,padding:16,marginBottom:14}}>
+        <div style={{fontSize:13,fontWeight:500,marginBottom:12}}>Shipments by month (ETD)</div>
+        <div style={{display:"flex",alignItems:"flex-end",gap:3,height:100,overflowX:"auto",paddingBottom:4}}>
+          {months.map(m=>(
+            <div key={m} style={{display:"flex",flexDirection:"column",alignItems:"center",minWidth:34}}>
+              <span style={{fontSize:9,color:V.text2,marginBottom:2}}>{byMonth[m]}</span>
+              <div style={{width:26,background:"#b45309",borderRadius:"2px 2px 0 0",height:`${Math.round(byMonth[m]/maxM*76)}px`}}/>
+              <span style={{fontSize:9,color:V.text2,marginTop:18,transform:"rotate(-45deg)",transformOrigin:"top left",whiteSpace:"nowrap"}}>{m.slice(5)}/{m.slice(2,4)}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
+        {[["Top customers",topC,"#b45309"],["Agents",topA,"#0e7490"]].map(([title,items,c])=>(
+          <div key={title} style={{background:V.bg,border:`0.5px solid ${V.border}`,borderRadius:12,padding:16}}>
+            <div style={{fontSize:13,fontWeight:500,marginBottom:12}}>{title}</div>
+            {items.map(([k,v])=>(
+              <div key={k} style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+                <span style={{fontSize:12,flex:1,color:V.text2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{k}</span>
+                <span style={{fontSize:12,fontWeight:500}}>{v}</span>
+                <div style={{width:56,height:6,background:V.bg2,borderRadius:3,overflow:"hidden"}}><div style={{width:`${items[0]?Math.round(v/items[0][1]*100):0}%`,height:"100%",background:c,borderRadius:3}}/></div>
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── MANAGE ───────────────────────────────────────────────
+function Manage({data,saveRow,deleteRow,syncing}){
+  const [mode,setMode]=useState("list");
+  const [newRow,setNewRow]=useState(null);
+  const blank=()=>({
+    "LQC PO#":"","Customer":"","Customer PO":"","SKUs":[{sku:"",qty:"",unit:"CTN"}],
+    "Volume":"","ETD":"","ETA":"","POD":"","Destination":"","Agent":"",
+    "Container #":"","BOL #":"","O/F":"","Invoice #":"","MABD":"","Note":"",
+    "Status":"PO Placed","Shipping Model":"US Warehouse"
+  });
+  async function handleSave(){if(!newRow["LQC PO#"])return;await saveRow(newRow);setMode("list");setNewRow(null);}
+  if(mode==="new"&&newRow)return(
+    <div style={{padding:24}}>
+      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:18}}>
+        <button onClick={()=>{setMode("list");setNewRow(null);}} style={{fontSize:12,padding:"5px 12px",border:`0.5px solid ${V.border2}`,borderRadius:6,background:"transparent",cursor:"pointer",color:V.text}}>← Back</button>
+        <span style={{fontSize:16,fontWeight:500}}>New shipment</span>
+      </div>
+      <ShipmentForm row={newRow} setRow={setNewRow} onSave={handleSave} onCancel={()=>{setMode("list");setNewRow(null);}} syncing={syncing}/>
+    </div>
+  );
+  return(
+    <div style={{padding:24}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
+        <h2 style={{fontSize:18,fontWeight:500,margin:0}}>Order management</h2>
+        <button onClick={()=>{setNewRow(blank());setMode("new");}} style={{fontSize:13,padding:"7px 16px",border:"none",borderRadius:8,background:"#b45309",color:"#fff",cursor:"pointer",fontWeight:500}}>+ New shipment</button>
+      </div>
+      <div style={{background:V.bg,border:`0.5px solid ${V.border}`,borderRadius:12,padding:14,marginBottom:14,fontSize:13,color:V.text2}}>
+        New shipments are saved directly to your Google Sheet. Use the <strong>Shipments</strong> tab to edit or update statuses on existing orders.
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12}}>
+        {["RJW PA P01","Unitrans MA","RJW TX D01"].map(w=>(
+          <div key={w} style={{background:V.bg,border:`0.5px solid ${V.border}`,borderRadius:12,padding:16}}>
+            <div style={{fontSize:12,fontWeight:500,marginBottom:4}}>🏬 {w}</div>
+            <div style={{fontSize:12,color:V.text2}}>{data.filter(r=>r["Destination"]&&r["Destination"].toLowerCase().includes(w.toLowerCase().split(" ")[0])).length} shipments</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ShipmentForm({row,setRow,onSave,onCancel,syncing}){
+  const set=(k,v)=>setRow(r=>({...r,[k]:v}));
+  const setSku=(i,k,v)=>setRow(r=>{const s=[...r["SKUs"]];s[i]={...s[i],[k]:v};return{...r,"SKUs":s};});
+  const fld={width:"100%",fontSize:13,padding:"6px 8px",border:`0.5px solid ${V.border2}`,borderRadius:6,background:V.bg,color:V.text,boxSizing:"border-box"};
+  const lbl={fontSize:11,color:V.text2,marginBottom:3,display:"block"};
+  return(
+    <div style={{background:V.bg,border:`0.5px solid ${V.border}`,borderRadius:12,padding:20}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12,marginBottom:14}}>
+        {[["LQC PO#","LQC PO#"],["Customer","Customer"],["Customer PO","Customer PO"],["ETD","ETD","date"],["ETA","ETA","date"],["MABD","MABD","date"],["POD","POD"],["Destination","Destination"],["Agent","Agent"],["Volume","Volume"],["Container #","Container #"],["BOL #","BOL #"],["O/F","O/F"],["Note","Note"]].map(([l,k,t])=>(
+          <div key={k}><label style={lbl}>{l}</label><input type={t||"text"} value={row[k]||""} onChange={e=>set(k,e.target.value)} style={fld}/></div>
+        ))}
+        <div><label style={lbl}>Status</label><select value={row["Status"]} onChange={e=>set("Status",e.target.value)} style={fld}>{STATUSES.map(s=><option key={s}>{s}</option>)}</select></div>
+        <div><label style={lbl}>Shipping model</label><select value={row["Shipping Model"]} onChange={e=>set("Shipping Model",e.target.value)} style={fld}>{["Direct to Client","US Warehouse","Port Pickup"].map(m=><option key={m}>{m}</option>)}</select></div>
+      </div>
+      <div style={{marginBottom:12}}>
+        <div style={{fontSize:12,fontWeight:500,marginBottom:8}}>SKUs</div>
+        {row["SKUs"].map((s,i)=>(
+          <div key={i} style={{display:"grid",gridTemplateColumns:"1fr 80px 80px",gap:8,marginBottom:6}}>
+            <input placeholder="SKU description" value={s.sku} onChange={e=>setSku(i,"sku",e.target.value)} style={fld}/>
+            <input placeholder="Qty" value={s.qty} onChange={e=>setSku(i,"qty",e.target.value)} style={fld}/>
+            <input placeholder="Unit" value={s.unit} onChange={e=>setSku(i,"unit",e.target.value)} style={fld}/>
+          </div>
+        ))}
+        <button onClick={()=>setRow(r=>({...r,"SKUs":[...r["SKUs"],{sku:"",qty:"",unit:"CTN"}]}))} style={{fontSize:12,padding:"4px 10px",border:`0.5px solid ${V.border2}`,borderRadius:6,background:"transparent",cursor:"pointer",color:V.text}}>+ Add SKU</button>
+      </div>
+      <div style={{display:"flex",gap:8}}>
+        <button onClick={onSave} disabled={syncing} style={{fontSize:13,padding:"7px 20px",border:"none",borderRadius:8,background:"#b45309",color:"#fff",cursor:"pointer",fontWeight:500}}>{syncing?"Saving…":"Save shipment"}</button>
+        <button onClick={onCancel} style={{fontSize:13,padding:"7px 16px",border:`0.5px solid ${V.border2}`,borderRadius:8,background:"transparent",cursor:"pointer",color:V.text}}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
+// ─── EDIT MODAL ───────────────────────────────────────────
+function EditModal({row,onSave,onClose,syncing}){
+  const [r,setR]=useState({...row,SKUs:Array.isArray(row["SKUs"])?[...row["SKUs"].map(s=>({...s}))]:[{sku:"",qty:"",unit:"CTN"}]});
+  const set=(k,v)=>setR(p=>({...p,[k]:v}));
+  const setSku=(i,k,v)=>setR(p=>{const s=[...p.SKUs];s[i]={...s[i],[k]:v};return{...p,SKUs:s};});
+  const fld={width:"100%",fontSize:13,padding:"6px 8px",border:`0.5px solid ${V.border2}`,borderRadius:6,background:V.bg,color:V.text,boxSizing:"border-box"};
+  const lbl={fontSize:11,color:V.text2,marginBottom:3,display:"block"};
+  function handleSave(){const out={...r,"SKUs":r.SKUs};onSave(out);}
+  return(
+    <div className="modal-overlay">
+      <div style={{background:V.bg,borderRadius:12,border:`0.5px solid ${V.border}`,padding:22,width:720,maxWidth:"95vw",maxHeight:"84vh",overflow:"auto"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+          <span style={{fontSize:15,fontWeight:500}}>Edit: {r["LQC PO#"]}</span>
+          <button onClick={onClose} style={{fontSize:18,border:"none",background:"transparent",cursor:"pointer",color:V.text2}}>×</button>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:12}}>
+          {[["Customer","Customer"],["Customer PO","Customer PO"],["ETD","ETD","date"],["ETA","ETA","date"],["MABD","MABD","date"],["POD","POD"],["Destination","Destination"],["Agent","Agent"],["Volume","Volume"],["Container #","Container #"],["BOL #","BOL #"],["O/F","O/F"],["Invoice #","Invoice #"],["Note","Note"]].map(([l,k,t])=>(
+            <div key={k}><label style={lbl}>{l}</label><input type={t||"text"} value={r[k]||""} onChange={e=>set(k,e.target.value)} style={fld}/></div>
+          ))}
+          <div><label style={lbl}>Status</label><select value={r["Status"]} onChange={e=>set("Status",e.target.value)} style={fld}>{STATUSES.map(s=><option key={s}>{s}</option>)}</select></div>
+          <div><label style={lbl}>Shipping model</label><select value={r["Shipping Model"]} onChange={e=>set("Shipping Model",e.target.value)} style={fld}>{["Direct to Client","US Warehouse","Port Pickup"].map(m=><option key={m}>{m}</option>)}</select></div>
+        </div>
+        <div style={{marginBottom:12}}>
+          <div style={{fontSize:12,fontWeight:500,marginBottom:8}}>SKUs</div>
+          {r.SKUs.map((s,i)=>(
+            <div key={i} style={{display:"grid",gridTemplateColumns:"1fr 80px 80px",gap:8,marginBottom:6}}>
+              <input value={s.sku} onChange={e=>setSku(i,"sku",e.target.value)} style={fld}/>
+              <input value={s.qty} onChange={e=>setSku(i,"qty",e.target.value)} style={fld}/>
+              <input value={s.unit} onChange={e=>setSku(i,"unit",e.target.value)} style={fld}/>
+            </div>
+          ))}
+          <button onClick={()=>setR(p=>({...p,SKUs:[...p.SKUs,{sku:"",qty:"",unit:"CTN"}]}))} style={{fontSize:12,padding:"4px 10px",border:`0.5px solid ${V.border2}`,borderRadius:6,background:"transparent",cursor:"pointer",color:V.text}}>+ Add SKU</button>
+        </div>
+        <div style={{display:"flex",gap:8}}>
+          <button onClick={handleSave} disabled={syncing} style={{fontSize:13,padding:"7px 20px",border:"none",borderRadius:8,background:"#b45309",color:"#fff",cursor:"pointer",fontWeight:500}}>{syncing?"Saving…":"Save changes"}</button>
+          <button onClick={onClose} style={{fontSize:13,padding:"7px 16px",border:`0.5px solid ${V.border2}`,borderRadius:8,background:"transparent",cursor:"pointer",color:V.text}}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── BOOT ─────────────────────────────────────────────────
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
