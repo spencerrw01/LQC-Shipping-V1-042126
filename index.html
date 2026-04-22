@@ -23,7 +23,7 @@
 <div id="root"></div>
 
 <script type="text/babel">
-const {useState,useEffect,useMemo,useCallback,useRef} = React;
+const {useState,useEffect,useMemo,useCallback,useRef,useId} = React;
 
 // ─── CONFIG — paste your Apps Script Web App URL here ─────
 const API_URL = "https://script.google.com/macros/s/AKfycbwcdLfVnDtj68n1Ae-JfdZ9bMnZNpsci1T2YzO0MXHMcRHVJl-So8zPy0qSxDQyOez3Zg/exec";
@@ -147,6 +147,17 @@ function App(){
 
   const alerts=useMemo(()=>buildAlerts(data,dismissed),[data,dismissed]);
   const criticalCount=alerts.filter(a=>a.severity==="critical").length;
+  const skuCatalog=useMemo(()=>{
+    const set=new Set();
+    data.forEach(r=>{
+      const skus=Array.isArray(r["SKUs"])?r["SKUs"]:[];
+      skus.forEach(s=>{
+        const name=String(s?.sku||"").trim();
+        if(name)set.add(name);
+      });
+    });
+    return [...set].sort((a,b)=>a.localeCompare(b));
+  },[data]);
 
   function saveDismissed(s){setDismissed(s);localStorage.setItem("lqc_dismissed",JSON.stringify([...s]));}
   function dismiss(id){saveDismissed(new Set([...dismissed,id]));}
@@ -259,11 +270,11 @@ function App(){
           {tab==="Calendar"&&<Calendar data={data} calMonth={calMonth} setCalMonth={setCalMonth} alerts={alerts}/>}
           {tab==="Alerts"&&<AlertsTab alerts={alerts.filter(a=>alertTypeFilter==="All"||a.type===alertTypeFilter)} allAlerts={alerts} typeFilter={alertTypeFilter} setTypeFilter={setAlertTypeFilter} dismiss={dismiss} dismissAll={dismissAll} dismissed={dismissed} saveDismissed={saveDismissed}/>}
           {tab==="Analytics"&&<Analytics data={data}/>}
-          {tab==="Manage"&&<Manage data={data} saveRow={saveRow} deleteRow={deleteRow} syncing={syncing}/>}
+          {tab==="Manage"&&<Manage data={data} saveRow={saveRow} deleteRow={deleteRow} syncing={syncing} skuCatalog={skuCatalog}/>}
         </>}
       </div>
 
-      {editRow&&<EditModal row={editRow} onSave={async(r)=>{await saveRow(r);setEditRow(null);}} onClose={()=>setEditRow(null)} syncing={syncing}/>}
+      {editRow&&<EditModal row={editRow} onSave={async(r)=>{await saveRow(r);setEditRow(null);}} onClose={()=>setEditRow(null)} syncing={syncing} skuCatalog={skuCatalog}/>}
       {syncing&&<div style={{position:"fixed",bottom:16,right:16,background:"#b45309",color:"#fff",fontSize:12,padding:"6px 14px",borderRadius:20,fontWeight:500,zIndex:9999}}>Saving to Google Sheet…</div>}
     </div>
   );
@@ -772,7 +783,7 @@ function Analytics({data}){
 }
 
 // ─── MANAGE ───────────────────────────────────────────────
-function Manage({data,saveRow,deleteRow,syncing}){
+function Manage({data,saveRow,deleteRow,syncing,skuCatalog}){
   const [mode,setMode]=useState("list");
   const [newRow,setNewRow]=useState(null);
   const blank=()=>({
@@ -788,7 +799,7 @@ function Manage({data,saveRow,deleteRow,syncing}){
         <button onClick={()=>{setMode("list");setNewRow(null);}} style={{fontSize:12,padding:"5px 12px",border:`0.5px solid ${V.border2}`,borderRadius:6,background:"transparent",cursor:"pointer",color:V.text}}>← Back</button>
         <span style={{fontSize:16,fontWeight:500}}>New shipment</span>
       </div>
-      <ShipmentForm row={newRow} setRow={setNewRow} onSave={handleSave} onCancel={()=>{setMode("list");setNewRow(null);}} syncing={syncing}/>
+      <ShipmentForm row={newRow} setRow={setNewRow} onSave={handleSave} onCancel={()=>{setMode("list");setNewRow(null);}} syncing={syncing} skuCatalog={skuCatalog}/>
     </div>
   );
   return(
@@ -812,7 +823,19 @@ function Manage({data,saveRow,deleteRow,syncing}){
   );
 }
 
-function ShipmentForm({row,setRow,onSave,onCancel,syncing}){
+function SkuAutocompleteInput({value,onChange,options,placeholder,style}){
+  const listId=useId();
+  return(
+    <>
+      <input list={listId} placeholder={placeholder} value={value} onChange={onChange} style={style}/>
+      <datalist id={listId}>
+        {options.map(sku=><option key={sku} value={sku}/>)}
+      </datalist>
+    </>
+  );
+}
+
+function ShipmentForm({row,setRow,onSave,onCancel,syncing,skuCatalog}){
   const set=(k,v)=>setRow(r=>({...r,[k]:v}));
   const setSku=(i,k,v)=>setRow(r=>{const s=[...r["SKUs"]];s[i]={...s[i],[k]:v};return{...r,"SKUs":s};});
   const fld={width:"100%",fontSize:13,padding:"6px 8px",border:`0.5px solid ${V.border2}`,borderRadius:6,background:V.bg,color:V.text,boxSizing:"border-box"};
@@ -830,7 +853,7 @@ function ShipmentForm({row,setRow,onSave,onCancel,syncing}){
         <div style={{fontSize:12,fontWeight:500,marginBottom:8}}>SKUs</div>
         {row["SKUs"].map((s,i)=>(
           <div key={i} style={{display:"grid",gridTemplateColumns:"1fr 80px 80px",gap:8,marginBottom:6}}>
-            <input placeholder="SKU description" value={s.sku} onChange={e=>setSku(i,"sku",e.target.value)} style={fld}/>
+            <SkuAutocompleteInput placeholder="SKU description" value={s.sku} onChange={e=>setSku(i,"sku",e.target.value)} options={skuCatalog} style={fld}/>
             <input placeholder="Qty" value={s.qty} onChange={e=>setSku(i,"qty",e.target.value)} style={fld}/>
             <input placeholder="Unit" value={s.unit} onChange={e=>setSku(i,"unit",e.target.value)} style={fld}/>
           </div>
@@ -846,7 +869,7 @@ function ShipmentForm({row,setRow,onSave,onCancel,syncing}){
 }
 
 // ─── EDIT MODAL ───────────────────────────────────────────
-function EditModal({row,onSave,onClose,syncing}){
+function EditModal({row,onSave,onClose,syncing,skuCatalog}){
   const [r,setR]=useState({...row,SKUs:Array.isArray(row["SKUs"])?[...row["SKUs"].map(s=>({...s}))]:[{sku:"",qty:"",unit:"CTN"}]});
   const set=(k,v)=>setR(p=>({...p,[k]:v}));
   const setSku=(i,k,v)=>setR(p=>{const s=[...p.SKUs];s[i]={...s[i],[k]:v};return{...p,SKUs:s};});
@@ -871,7 +894,7 @@ function EditModal({row,onSave,onClose,syncing}){
           <div style={{fontSize:12,fontWeight:500,marginBottom:8}}>SKUs</div>
           {r.SKUs.map((s,i)=>(
             <div key={i} style={{display:"grid",gridTemplateColumns:"1fr 80px 80px",gap:8,marginBottom:6}}>
-              <input value={s.sku} onChange={e=>setSku(i,"sku",e.target.value)} style={fld}/>
+              <SkuAutocompleteInput value={s.sku} onChange={e=>setSku(i,"sku",e.target.value)} options={skuCatalog} style={fld}/>
               <input value={s.qty} onChange={e=>setSku(i,"qty",e.target.value)} style={fld}/>
               <input value={s.unit} onChange={e=>setSku(i,"unit",e.target.value)} style={fld}/>
             </div>
