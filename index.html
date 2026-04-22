@@ -703,81 +703,267 @@ function AlertCard({a,dismiss}){
 
 // ─── ANALYTICS ────────────────────────────────────────────
 function Analytics({data}){
-  const [fC,setFC]=useState("All");const [fM,setFM]=useState("All");const [df,setDF]=useState("");const [dt,setDT]=useState("");
+  const [fC,setFC]=useState("All");
+  const [fM,setFM]=useState("All");
+  const [fA,setFA]=useState("All");
+  const [fS,setFS]=useState("All");
+  const [df,setDF]=useState("");
+  const [dt,setDT]=useState("");
+  const [dateField,setDateField]=useState("ETD");
+  const [topCount,setTopCount]=useState(8);
+  const [freightPerCbm,setFreightPerCbm]=useState(130);
+  const [dutyPct,setDutyPct]=useState(5);
+  const [delayCostPerDay,setDelayCostPerDay]=useState(95);
+
   const customers=["All",...new Set(data.map(r=>r["Customer"]).filter(Boolean))].sort();
+  const agents=["All",...new Set(data.map(r=>r["Agent"]).filter(Boolean))].sort();
+
+  const num=v=>{
+    const n=Number(String(v??"").replace(/[^0-9.-]/g,""));
+    return Number.isFinite(n)?n:0;
+  };
+
   const f=useMemo(()=>data.filter(r=>{
     if(fC!=="All"&&r["Customer"]!==fC)return false;
     if(fM!=="All"&&r["Shipping Model"]!==fM)return false;
-    if(df){const d=parseDate(r["ETD"]);if(!d||d<new Date(df))return false;}
-    if(dt){const d=parseDate(r["ETD"]);if(!d||d>new Date(dt))return false;}
+    if(fA!=="All"&&r["Agent"]!==fA)return false;
+    if(fS!=="All"&&r["Status"]!==fS)return false;
+    const d=parseDate(r[dateField]);
+    if(df){const from=new Date(df+"T00:00:00");if(!d||d<from)return false;}
+    if(dt){const to=new Date(dt+"T23:59:59");if(!d||d>to)return false;}
     return true;
-  }),[data,fC,fM,df,dt]);
-  const byModel={},byStatus={},byAgent={},byCustomer={},byMonth={};
-  f.forEach(r=>{
-    byModel[r["Shipping Model"]]=(byModel[r["Shipping Model"]]||0)+1;
-    byStatus[r["Status"]]=(byStatus[r["Status"]]||0)+1;
-    byAgent[r["Agent"]]=(byAgent[r["Agent"]]||0)+1;
-    byCustomer[r["Customer"]]=(byCustomer[r["Customer"]]||0)+1;
-    if(r["ETD"]){const d=new Date(r["ETD"]);const k=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;byMonth[k]=(byMonth[k]||0)+1;}
-  });
-  const months=Object.keys(byMonth).sort();
-  const maxM=Math.max(...Object.values(byMonth),1);
-  const topC=Object.entries(byCustomer).sort((a,b)=>b[1]-a[1]).slice(0,10);
-  const topA=Object.entries(byAgent).sort((a,b)=>b[1]-a[1]).slice(0,8);
-  const total=f.length||1;
-  const sel={fontSize:12,padding:"5px 8px",border:`0.5px solid ${V.border2}`,borderRadius:6,background:V.bg,color:V.text};
+  }),[data,fC,fM,fA,fS,df,dt,dateField]);
+
+  const metrics=useMemo(()=>{
+    const byModel={},byStatus={},byAgent={},byCustomer={},byMonth={},bySku={};
+    let totalVolume=0,totalSkuQty=0,totalFreight=0,totalDuty=0,totalDelayRisk=0,onTimeCount=0,datedTransit=0;
+
+    f.forEach(r=>{
+      byModel[r["Shipping Model"]]=(byModel[r["Shipping Model"]]||0)+1;
+      byStatus[r["Status"]]=(byStatus[r["Status"]]||0)+1;
+      byAgent[r["Agent"]||"Unassigned"]=(byAgent[r["Agent"]||"Unassigned"]||0)+1;
+      byCustomer[r["Customer"]||"Unknown"]=(byCustomer[r["Customer"]||"Unknown"]||0)+1;
+
+      const shipDate=parseDate(r[dateField]);
+      if(shipDate){
+        const k=`${shipDate.getFullYear()}-${String(shipDate.getMonth()+1).padStart(2,"0")}`;
+        byMonth[k]=(byMonth[k]||0)+1;
+      }
+
+      const volume=num(r["Volume"]);
+      const etd=parseDate(r["ETD"]);
+      const eta=parseDate(r["ETA"]);
+      if(volume>0){
+        totalVolume+=volume;
+        totalFreight+=volume*Number(freightPerCbm||0);
+      }
+
+      if(etd&&eta){
+        datedTransit++;
+        const transit=Math.round((eta-etd)/86400000);
+        const laneTarget=getLaneDays(r["POD"]);
+        if(transit<=laneTarget)onTimeCount++;
+      }
+
+      if(eta&&r["Status"]==="In Transit"&&daysDiff(eta)<0){
+        totalDelayRisk+=Math.abs(daysDiff(eta))*Number(delayCostPerDay||0);
+      }
+
+      const skus=Array.isArray(r["SKUs"])?r["SKUs"]:[];
+      const shipQty=skus.reduce((sum,s)=>sum+num(s.qty),0);
+      totalSkuQty+=shipQty;
+      skus.forEach(s=>{
+        const sku=(s?.sku||"Unnamed SKU").trim()||"Unnamed SKU";
+        const qty=num(s.qty);
+        const unit=s?.unit||"units";
+        if(!bySku[sku])bySku[sku]={qty:0,shipments:new Set(),customers:new Set(),unit,estFreight:0};
+        bySku[sku].qty+=qty;
+        bySku[sku].shipments.add(r["LQC PO#"]);
+        bySku[sku].customers.add(r["Customer"]||"Unknown");
+        const allocBase=shipQty>0?qty/shipQty:0;
+        bySku[sku].estFreight+=(volume*Number(freightPerCbm||0))*allocBase;
+      });
+    });
+
+    totalDuty=totalFreight*(Number(dutyPct||0)/100);
+
+    const productRows=Object.entries(bySku).map(([sku,v])=>({
+      sku,
+      qty:v.qty,
+      unit:v.unit,
+      shipments:v.shipments.size,
+      customers:v.customers.size,
+      estFreight:v.estFreight
+    })).sort((a,b)=>b.qty-a.qty);
+
+    return {
+      byModel,byStatus,byAgent,byCustomer,byMonth,
+      productRows,
+      totals:{
+        shipments:f.length,
+        volume:totalVolume,
+        skuQty:totalSkuQty,
+        estFreight:totalFreight,
+        estDuty:totalDuty,
+        estLanded:totalFreight+totalDuty,
+        onTimeRate:datedTransit?Math.round(onTimeCount/datedTransit*100):0,
+        delayRisk:totalDelayRisk
+      }
+    };
+  },[f,freightPerCbm,dutyPct,delayCostPerDay,dateField]);
+
+  const months=Object.keys(metrics.byMonth).sort();
+  const maxM=Math.max(...Object.values(metrics.byMonth),1);
+  const topProducts=metrics.productRows.slice(0,topCount);
+  const topCustomers=Object.entries(metrics.byCustomer).sort((a,b)=>b[1]-a[1]).slice(0,6);
+  const topAgents=Object.entries(metrics.byAgent).sort((a,b)=>b[1]-a[1]).slice(0,6);
+  const total=metrics.totals.shipments||1;
+  const sel={fontSize:12,padding:"6px 10px",border:`0.5px solid ${V.border2}`,borderRadius:8,background:V.bg,color:V.text};
+
+  const insightCards=[
+    {title:"Landed cost exposure",value:`$${Math.round(metrics.totals.estLanded).toLocaleString()}`,note:`Freight + ${dutyPct}% duty assumption`,color:"#7c3aed"},
+    {title:"Transit reliability",value:`${metrics.totals.onTimeRate}%`,note:"Shipments meeting lane benchmarks",color:"#059669"},
+    {title:"Delay risk",value:`$${Math.round(metrics.totals.delayRisk).toLocaleString()}`,note:"Projected over-ETA holding impact",color:"#dc2626"}
+  ];
+
   return(
     <div style={{padding:24}}>
-      <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap",alignItems:"center"}}>
-        <select value={fC} onChange={e=>setFC(e.target.value)} style={sel}>{customers.map(c=><option key={c}>{c}</option>)}</select>
-        <select value={fM} onChange={e=>setFM(e.target.value)} style={sel}>{["All","Direct to Client","US Warehouse","Port Pickup"].map(m=><option key={m}>{m}</option>)}</select>
-        <input type="date" value={df} onChange={e=>setDF(e.target.value)} style={sel}/>
-        <span style={{fontSize:12,color:V.text2}}>to</span>
-        <input type="date" value={dt} onChange={e=>setDT(e.target.value)} style={sel}/>
-        <span style={{fontSize:12,color:V.text2}}>{f.length} shipments</span>
+      <div style={{background:"linear-gradient(135deg,#0f172a,#1e293b)",borderRadius:16,padding:18,marginBottom:16,color:"#e2e8f0",boxShadow:"0 14px 40px rgba(15,23,42,.28)"}}>
+        <div style={{fontSize:11,letterSpacing:".08em",textTransform:"uppercase",opacity:.8,marginBottom:8}}>Robust analytics studio</div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(4,minmax(140px,1fr))",gap:10}}>
+          {[{l:"Filtered Shipments",v:metrics.totals.shipments},{l:"Total Volume",v:metrics.totals.volume.toLocaleString()},{l:"SKU Units",v:Math.round(metrics.totals.skuQty).toLocaleString()},{l:"Est. Freight",v:`$${Math.round(metrics.totals.estFreight).toLocaleString()}`}].map(c=>(
+            <div key={c.l} style={{background:"rgba(148,163,184,.15)",border:"1px solid rgba(148,163,184,.2)",borderRadius:10,padding:"10px 12px"}}>
+              <div style={{fontSize:10,opacity:.75,marginBottom:3}}>{c.l}</div>
+              <div style={{fontSize:22,fontWeight:600,color:"#f8fafc"}}>{c.v}</div>
+            </div>
+          ))}
+        </div>
       </div>
+
+      <div style={{display:"grid",gridTemplateColumns:"2fr 1fr",gap:12,marginBottom:16}}>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",background:V.bg,border:`0.5px solid ${V.border}`,borderRadius:12,padding:12}}>
+          <select value={fC} onChange={e=>setFC(e.target.value)} style={sel}>{customers.map(c=><option key={c}>{c}</option>)}</select>
+          <select value={fM} onChange={e=>setFM(e.target.value)} style={sel}>{["All","Direct to Client","US Warehouse","Port Pickup"].map(m=><option key={m}>{m}</option>)}</select>
+          <select value={fA} onChange={e=>setFA(e.target.value)} style={sel}>{agents.map(a=><option key={a}>{a}</option>)}</select>
+          <select value={fS} onChange={e=>setFS(e.target.value)} style={sel}><option>All</option>{STATUSES.map(s=><option key={s}>{s}</option>)}</select>
+          <select value={dateField} onChange={e=>setDateField(e.target.value)} style={sel}>{["ETD","ETA"].map(d=><option key={d}>{d}</option>)}</select>
+          <input type="date" value={df} onChange={e=>setDF(e.target.value)} style={sel}/>
+          <span style={{fontSize:12,color:V.text2}}>to</span>
+          <input type="date" value={dt} onChange={e=>setDT(e.target.value)} style={sel}/>
+        </div>
+        <div style={{background:V.bg,border:`0.5px solid ${V.border}`,borderRadius:12,padding:12}}>
+          <div style={{fontSize:11,color:V.text2,marginBottom:6}}>Financial assumptions</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+            <label style={{fontSize:11,color:V.text2}}>Freight/CBM<input type="number" value={freightPerCbm} onChange={e=>setFreightPerCbm(e.target.value)} style={{...sel,width:"100%",marginTop:2}}/></label>
+            <label style={{fontSize:11,color:V.text2}}>Duty %<input type="number" value={dutyPct} onChange={e=>setDutyPct(e.target.value)} style={{...sel,width:"100%",marginTop:2}}/></label>
+            <label style={{fontSize:11,color:V.text2,gridColumn:"1 / -1"}}>Delay $/day<input type="number" value={delayCostPerDay} onChange={e=>setDelayCostPerDay(e.target.value)} style={{...sel,width:"100%",marginTop:2}}/></label>
+          </div>
+        </div>
+      </div>
+
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:14}}>
-        {[["Shipping model",Object.entries(MODEL_COLORS),byModel],["Status",Object.entries(STATUS_COLORS),byStatus]].map(([title,pairs,map])=>(
+        {[ ["Shipping model",Object.entries(MODEL_COLORS),metrics.byModel],["Status",Object.entries(STATUS_COLORS),metrics.byStatus] ].map(([title,pairs,map])=>(
           <div key={title} style={{background:V.bg,border:`0.5px solid ${V.border}`,borderRadius:12,padding:16}}>
-            <div style={{fontSize:13,fontWeight:500,marginBottom:12}}>{title}</div>
-            {pairs.map(([k,c])=>{const v=map[k]||0;return(
-              <div key={k} style={{display:"flex",alignItems:"center",gap:8,marginBottom:7}}>
-                <div style={{width:10,height:10,borderRadius:2,background:c}}/>
+            <div style={{fontSize:13,fontWeight:600,marginBottom:12}}>{title}</div>
+            {pairs.map(([k,c])=>{const v=map[k]||0;const pct=Math.round(v/total*100);return(
+              <div key={k} style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+                <span style={{width:10,height:10,borderRadius:3,background:c}}/>
                 <span style={{fontSize:12,flex:1,color:V.text2}}>{k}</span>
-                <span style={{fontSize:12,fontWeight:500}}>{v}</span>
-                <div style={{width:70,height:6,background:V.bg2,borderRadius:3,overflow:"hidden"}}><div style={{width:`${Math.round(v/total*100)}%`,height:"100%",background:c,borderRadius:3}}/></div>
-                <span style={{fontSize:10,color:V.text2,width:26,textAlign:"right"}}>{Math.round(v/total*100)}%</span>
+                <span style={{fontSize:12,fontWeight:600,width:24,textAlign:"right"}}>{v}</span>
+                <div style={{height:8,flex:1,maxWidth:130,background:V.bg2,borderRadius:999,overflow:"hidden"}}><div style={{height:"100%",width:`${pct}%`,background:c}}/></div>
+                <span style={{fontSize:10,color:V.text2,width:28,textAlign:"right"}}>{pct}%</span>
               </div>
             );})}
           </div>
         ))}
       </div>
+
       <div style={{background:V.bg,border:`0.5px solid ${V.border}`,borderRadius:12,padding:16,marginBottom:14}}>
-        <div style={{fontSize:13,fontWeight:500,marginBottom:12}}>Shipments by month (ETD)</div>
-        <div style={{display:"flex",alignItems:"flex-end",gap:3,height:100,overflowX:"auto",paddingBottom:4}}>
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}>
+          <div style={{fontSize:13,fontWeight:600}}>Trend chart ({dateField})</div>
+          <div style={{fontSize:11,color:V.text2}}>Monthly shipment flow</div>
+        </div>
+        <div style={{display:"flex",alignItems:"flex-end",gap:6,height:120,overflowX:"auto",paddingBottom:8}}>
           {months.map(m=>(
-            <div key={m} style={{display:"flex",flexDirection:"column",alignItems:"center",minWidth:34}}>
-              <span style={{fontSize:9,color:V.text2,marginBottom:2}}>{byMonth[m]}</span>
-              <div style={{width:26,background:"#b45309",borderRadius:"2px 2px 0 0",height:`${Math.round(byMonth[m]/maxM*76)}px`}}/>
-              <span style={{fontSize:9,color:V.text2,marginTop:18,transform:"rotate(-45deg)",transformOrigin:"top left",whiteSpace:"nowrap"}}>{m.slice(5)}/{m.slice(2,4)}</span>
+            <div key={m} style={{display:"flex",flexDirection:"column",alignItems:"center",minWidth:40}}>
+              <div style={{fontSize:10,color:V.text2,marginBottom:4}}>{metrics.byMonth[m]}</div>
+              <div style={{width:30,height:`${Math.max(8,Math.round(metrics.byMonth[m]/maxM*88))}px`,background:"linear-gradient(180deg,#38bdf8,#0ea5e9)",borderRadius:"8px 8px 3px 3px",boxShadow:"0 6px 14px rgba(14,165,233,.25)"}}/>
+              <div style={{fontSize:9,color:V.text2,marginTop:6}}>{m.slice(5)}/{m.slice(2,4)}</div>
             </div>
           ))}
+          {months.length===0&&<div style={{fontSize:12,color:V.text2}}>No dates in selected range.</div>}
         </div>
       </div>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
-        {[["Top customers",topC,"#b45309"],["Agents",topA,"#0e7490"]].map(([title,items,c])=>(
-          <div key={title} style={{background:V.bg,border:`0.5px solid ${V.border}`,borderRadius:12,padding:16}}>
-            <div style={{fontSize:13,fontWeight:500,marginBottom:12}}>{title}</div>
-            {items.map(([k,v])=>(
-              <div key={k} style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
-                <span style={{fontSize:12,flex:1,color:V.text2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{k}</span>
-                <span style={{fontSize:12,fontWeight:500}}>{v}</span>
-                <div style={{width:56,height:6,background:V.bg2,borderRadius:3,overflow:"hidden"}}><div style={{width:`${items[0]?Math.round(v/items[0][1]*100):0}%`,height:"100%",background:c,borderRadius:3}}/></div>
+
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:14}}>
+        <div style={{background:V.bg,border:`0.5px solid ${V.border}`,borderRadius:12,padding:16}}>
+          <div style={{fontSize:13,fontWeight:600,marginBottom:10}}>Top customers</div>
+          {topCustomers.map(([k,v])=><RowBar key={k} label={k} value={v} max={topCustomers[0]?.[1]||1} color="#f97316"/>) }
+          {topCustomers.length===0&&<div style={{fontSize:12,color:V.text2}}>No customer data.</div>}
+          <div style={{fontSize:13,fontWeight:600,margin:"14px 0 10px"}}>Top agents</div>
+          {topAgents.map(([k,v])=><RowBar key={k} label={k} value={v} max={topAgents[0]?.[1]||1} color="#14b8a6"/>) }
+          {topAgents.length===0&&<div style={{fontSize:12,color:V.text2}}>No agent data.</div>}
+        </div>
+
+        <div style={{background:V.bg,border:`0.5px solid ${V.border}`,borderRadius:12,padding:16}}>
+          <div style={{fontSize:13,fontWeight:600,marginBottom:10}}>Insights from filtered data</div>
+          <div style={{display:"grid",gap:8}}>
+            {insightCards.map(i=>(
+              <div key={i.title} style={{border:`1px solid ${i.color}33`,borderLeft:`4px solid ${i.color}`,borderRadius:10,padding:"10px 12px",background:`${i.color}10`}}>
+                <div style={{fontSize:11,color:V.text2,marginBottom:2}}>{i.title}</div>
+                <div style={{fontSize:20,fontWeight:700,color:i.color}}>{i.value}</div>
+                <div style={{fontSize:11,color:V.text2}}>{i.note}</div>
               </div>
             ))}
+            <div style={{fontSize:11,color:V.text2,marginTop:2}}>Tip: tighten date range + model filters to perform customer-specific profitability review.</div>
           </div>
-        ))}
+        </div>
       </div>
+
+      <div style={{background:V.bg,border:`0.5px solid ${V.border}`,borderRadius:12,overflow:"hidden"}}>
+        <div style={{padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",borderBottom:`0.5px solid ${V.border}`,background:V.bg2}}>
+          <div style={{fontSize:13,fontWeight:600}}>Product-level analytics table</div>
+          <label style={{fontSize:11,color:V.text2}}>Rows
+            <select value={topCount} onChange={e=>setTopCount(Number(e.target.value))} style={{...sel,marginLeft:6,padding:"3px 8px"}}>{[5,8,12,20].map(n=><option key={n} value={n}>{n}</option>)}</select>
+          </label>
+        </div>
+        <div style={{overflowX:"auto"}}>
+          <table style={{width:"100%",borderCollapse:"collapse",minWidth:780}}>
+            <thead>
+              <tr style={{background:V.bg2,fontSize:11,color:V.text2}}>
+                {["SKU / Product","Qty","Shipments","Customers","Est. Freight Allocation","Contribution"].map(h=><th key={h} style={{textAlign:"left",padding:"8px 12px",borderBottom:`0.5px solid ${V.border}`,fontWeight:600}}>{h}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {topProducts.map((r,i)=>{
+                const pct=metrics.totals.skuQty?Math.round(r.qty/metrics.totals.skuQty*100):0;
+                return(
+                  <tr key={r.sku} style={{fontSize:12,background:i%2===0?V.bg:"rgba(2,6,23,.02)",borderBottom:`0.5px solid ${V.border}`}}>
+                    <td style={{padding:"8px 12px",fontWeight:500}}>{r.sku}</td>
+                    <td style={{padding:"8px 12px"}}>{Math.round(r.qty).toLocaleString()} {r.unit}</td>
+                    <td style={{padding:"8px 12px"}}>{r.shipments}</td>
+                    <td style={{padding:"8px 12px"}}>{r.customers}</td>
+                    <td style={{padding:"8px 12px"}}>${Math.round(r.estFreight).toLocaleString()}</td>
+                    <td style={{padding:"8px 12px"}}><span style={{padding:"2px 8px",borderRadius:999,background:"#e0f2fe",color:"#0369a1",fontSize:11,fontWeight:600}}>{pct}% of units</span></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        {topProducts.length===0&&<div style={{padding:22,textAlign:"center",fontSize:12,color:V.text2}}>No SKU rows found for current filter selection.</div>}
+      </div>
+    </div>
+  );
+}
+
+function RowBar({label,value,max,color}){
+  const pct=Math.round((value/(max||1))*100);
+  return(
+    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+      <div style={{fontSize:12,color:V.text2,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{label}</div>
+      <div style={{fontSize:12,fontWeight:600,width:24,textAlign:"right"}}>{value}</div>
+      <div style={{width:90,height:8,background:V.bg2,borderRadius:999,overflow:"hidden"}}><div style={{height:"100%",width:`${pct}%`,background:color}}/></div>
     </div>
   );
 }
