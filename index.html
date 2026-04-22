@@ -35,7 +35,7 @@ const STATUS_COLORS = {"PO Placed":"#6b7280","In Production":"#b45309","Ready to
 const MODEL_COLORS = {"Direct to Client":"#b45309","US Warehouse":"#0e7490","Port Pickup":"#7c3aed"};
 const LANE_DAYS = {east:55,west:30,gulf:40,default:45};
 const WARN_DAYS = 3;
-const TABS = ["Dashboard","Shipments","SKU Search","Timeline","Calendar","Alerts","Analytics","Manage"];
+const TABS = ["Dashboard","Shipments","SKU Search","Timeline","Calendar","Alerts","Analytics","Item Setup","Manage"];
 
 const V = {
   bg:"#ffffff", bg2:"#f8fafc", bg3:"#f1f5f9",
@@ -128,6 +128,10 @@ function App(){
   const [bulkStatus,setBulkStatus]=useState("");
   const [calMonth,setCalMonth]=useState(new Date());
   const [lastSync,setLastSync]=useState(null);
+  const [itemSetup,setItemSetup]=useState(()=>{try{return JSON.parse(localStorage.getItem("lqc_item_setup")||"{}");}catch{return{};}});
+
+  function saveItemSetup(updated){setItemSetup(updated);localStorage.setItem("lqc_item_setup",JSON.stringify(updated));}
+
 
   // Load data from Google Sheet
   const loadData=useCallback(async()=>{
@@ -270,6 +274,7 @@ function App(){
           {tab==="Calendar"&&<Calendar data={data} calMonth={calMonth} setCalMonth={setCalMonth} alerts={alerts}/>}
           {tab==="Alerts"&&<AlertsTab alerts={alerts.filter(a=>alertTypeFilter==="All"||a.type===alertTypeFilter)} allAlerts={alerts} typeFilter={alertTypeFilter} setTypeFilter={setAlertTypeFilter} dismiss={dismiss} dismissAll={dismissAll} dismissed={dismissed} saveDismissed={saveDismissed}/>}
           {tab==="Analytics"&&<Analytics data={data}/>}
+          {tab==="Item Setup"&&<ItemSetup skuCatalog={skuCatalog} itemSetup={itemSetup} saveItemSetup={saveItemSetup}/>}
           {tab==="Manage"&&<Manage data={data} saveRow={saveRow} deleteRow={deleteRow} syncing={syncing} skuCatalog={skuCatalog}/>}
         </>}
       </div>
@@ -967,6 +972,64 @@ function RowBar({label,value,max,color}){
     </div>
   );
 }
+// ─── ITEM SETUP ───────────────────────────────────────────
+function ItemSetup({skuCatalog,itemSetup,saveItemSetup}){
+  const [draft,setDraft]=useState(()=>({...itemSetup}));
+  const [saved,setSaved]=useState(false);
+  const [newSku,setNewSku]=useState("");
+  const allSkus=useMemo(()=>{const set=new Set([...skuCatalog,...Object.keys(draft)]);return [...set].sort((a,b)=>a.localeCompare(b));},[skuCatalog,draft]);
+  function setField(sku,field,val){setDraft(d=>{const prev=d[sku]||{cost:"",customsPct:""};return{...d,[sku]:{...prev,[field]:val}};});setSaved(false);}
+  function handleSave(){const clean={};Object.entries(draft).forEach(([sku,vals])=>{if(vals.cost!==""||vals.customsPct!=="")clean[sku]=vals;});saveItemSetup(clean);setDraft(clean);setSaved(true);setTimeout(()=>setSaved(false),2500);}
+  function addManualSku(){const name=newSku.trim();if(!name)return;setDraft(d=>({...d,[name]:d[name]||{cost:"",customsPct:""}}));setNewSku("");setSaved(false);}
+  function removeSku(sku){setDraft(d=>{const n={...d};delete n[sku];return n;});setSaved(false);}
+  const fld={fontSize:13,padding:"5px 8px",border:`0.5px solid ${V.border2}`,borderRadius:6,background:V.bg,color:V.text,width:"100%",boxSizing:"border-box"};
+  return(
+    <div style={{padding:24,maxWidth:860}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
+        <div>
+          <h2 style={{fontSize:18,fontWeight:500,margin:0,marginBottom:4}}>Item Setup</h2>
+          <p style={{fontSize:13,color:V.text2,margin:0}}>Set a unit cost and customs duty percentage for each product. These values are saved locally and used across the app.</p>
+        </div>
+        <button onClick={handleSave} style={{fontSize:13,padding:"7px 20px",border:"none",borderRadius:8,background:"#b45309",color:"#fff",cursor:"pointer",fontWeight:500,flexShrink:0,marginLeft:16}}>{saved?"✓ Saved":"Save changes"}</button>
+      </div>
+      <div style={{display:"flex",gap:8,marginBottom:18,marginTop:16}}>
+        <input value={newSku} onChange={e=>setNewSku(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addManualSku()} placeholder="Add a product not yet in a shipment…" style={{...fld,flex:1,padding:"7px 10px"}}/>
+        <button onClick={addManualSku} style={{fontSize:13,padding:"7px 16px",border:`0.5px solid ${V.border2}`,borderRadius:8,background:"transparent",cursor:"pointer",color:V.text,flexShrink:0}}>+ Add</button>
+      </div>
+      {allSkus.length===0&&(<div style={{background:V.bg,border:`0.5px solid ${V.border}`,borderRadius:12,padding:32,textAlign:"center",color:V.text2,fontSize:13}}>No products found. Products appear here automatically once shipments with SKUs are loaded, or you can add them manually above.</div>)}
+      {allSkus.length>0&&(
+        <div style={{background:V.bg,border:`0.5px solid ${V.border}`,borderRadius:12,overflow:"hidden"}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 160px 160px 36px",gap:12,padding:"10px 16px",background:V.bg3,borderBottom:`0.5px solid ${V.border}`,fontSize:11,fontWeight:600,color:V.text2,textTransform:"uppercase",letterSpacing:".05em"}}>
+            <div>Product / SKU</div><div>Unit Cost (USD)</div><div>Customs % (Duty)</div><div/>
+          </div>
+          {allSkus.map((sku,i)=>{
+            const vals=draft[sku]||{cost:"",customsPct:""};
+            const isFromShipment=skuCatalog.includes(sku);
+            return(
+              <div key={sku} style={{display:"grid",gridTemplateColumns:"1fr 160px 160px 36px",gap:12,padding:"10px 16px",borderBottom:i<allSkus.length-1?`0.5px solid ${V.border}`:"none",alignItems:"center",background:i%2===0?V.bg:V.bg2}}>
+                <div style={{display:"flex",alignItems:"center",gap:6}}>
+                  <span style={{fontSize:13,fontWeight:500,color:V.text}}>{sku}</span>
+                  {isFromShipment&&<span style={{fontSize:9,background:"rgba(180,87,9,.12)",color:"#b45309",borderRadius:4,padding:"1px 5px",fontWeight:600}}>IN USE</span>}
+                </div>
+                <div style={{position:"relative"}}>
+                  <span style={{position:"absolute",left:8,top:"50%",transform:"translateY(-50%)",fontSize:12,color:V.text2,pointerEvents:"none"}}>$</span>
+                  <input type="number" min="0" step="0.01" value={vals.cost} onChange={e=>setField(sku,"cost",e.target.value)} placeholder="0.00" style={{...fld,paddingLeft:20}}/>
+                </div>
+                <div style={{position:"relative"}}>
+                  <input type="number" min="0" max="100" step="0.1" value={vals.customsPct} onChange={e=>setField(sku,"customsPct",e.target.value)} placeholder="0.0" style={{...fld,paddingRight:20}}/>
+                  <span style={{position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",fontSize:12,color:V.text2,pointerEvents:"none"}}>%</span>
+                </div>
+                <button onClick={()=>removeSku(sku)} title="Remove" style={{fontSize:15,border:"none",background:"transparent",cursor:"pointer",color:"#94a3b8",padding:0,display:"flex",alignItems:"center",justifyContent:"center"}}>×</button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {allSkus.length>0&&(<div style={{marginTop:14,fontSize:12,color:V.text2}}>{allSkus.length} product{allSkus.length!==1?"s":""} · Changes are saved locally in your browser.</div>)}
+    </div>
+  );
+}
+
 
 // ─── MANAGE ───────────────────────────────────────────────
 function Manage({data,saveRow,deleteRow,syncing,skuCatalog}){
