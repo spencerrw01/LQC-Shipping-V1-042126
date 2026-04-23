@@ -129,8 +129,15 @@ function App(){
   const [calMonth,setCalMonth]=useState(new Date());
   const [lastSync,setLastSync]=useState(null);
   const [itemSetup,setItemSetup]=useState(()=>{try{return JSON.parse(localStorage.getItem("lqc_item_setup")||"{}");}catch{return{};}});
+  const [itemSetupSyncing,setItemSetupSyncing]=useState(false);
 
-  function saveItemSetup(updated){setItemSetup(updated);localStorage.setItem("lqc_item_setup",JSON.stringify(updated));}
+  async function saveItemSetup(updated){
+    setItemSetup(updated);
+    localStorage.setItem("lqc_item_setup",JSON.stringify(updated));
+    setItemSetupSyncing(true);
+    try{await apiPost({action:"saveItemSetup",itemSetup:updated});}catch{}
+    setItemSetupSyncing(false);
+  }
 
 
   // Load data from Google Sheet
@@ -138,9 +145,13 @@ function App(){
     if(!authed)return;
     setLoading(true);setSyncErr(false);
     try{
-      const res=await apiGet("getAll");
+      const [res,setupRes]=await Promise.all([apiGet("getAll"),apiGet("getItemSetup")]);
       if(res.shipments){setData(res.shipments);setLastSync(new Date());}
       else setSyncErr(true);
+      if(setupRes?.itemSetup&&typeof setupRes.itemSetup==="object"){
+        setItemSetup(setupRes.itemSetup);
+        localStorage.setItem("lqc_item_setup",JSON.stringify(setupRes.itemSetup));
+      }
     }catch{setSyncErr(true);}
     setLoading(false);
   },[authed]);
@@ -268,13 +279,13 @@ function App(){
         {loading&&data.length===0&&<LoadingScreen/>}
         {(!loading||data.length>0)&&<>
           {tab==="Dashboard"&&<Dashboard data={data} alerts={alerts} setTab={setTab}/>}
-          {tab==="Shipments"&&<Shipments data={data} alerts={alerts} quickStatus={quickStatus} setEditRow={setEditRow} selected={selected} toggleSelect={toggleSelect} toggleAll={toggleAll} bulkStatus={bulkStatus} setBulkStatus={setBulkStatus} applyBulk={applyBulk} syncing={syncing}/>}
+          {tab==="Shipments"&&<Shipments data={data} alerts={alerts} quickStatus={quickStatus} setEditRow={setEditRow} selected={selected} toggleSelect={toggleSelect} toggleAll={toggleAll} bulkStatus={bulkStatus} setBulkStatus={setBulkStatus} applyBulk={applyBulk} syncing={syncing} itemSetup={itemSetup}/>}
           {tab==="SKU Search"&&<SKUSearch data={data} alerts={alerts}/>}
           {tab==="Timeline"&&<Timeline data={data} alerts={alerts}/>}
           {tab==="Calendar"&&<Calendar data={data} calMonth={calMonth} setCalMonth={setCalMonth} alerts={alerts}/>}
           {tab==="Alerts"&&<AlertsTab alerts={alerts.filter(a=>alertTypeFilter==="All"||a.type===alertTypeFilter)} allAlerts={alerts} typeFilter={alertTypeFilter} setTypeFilter={setAlertTypeFilter} dismiss={dismiss} dismissAll={dismissAll} dismissed={dismissed} saveDismissed={saveDismissed}/>}
-          {tab==="Analytics"&&<Analytics data={data}/>}
-          {tab==="Item Setup"&&<ItemSetup skuCatalog={skuCatalog} itemSetup={itemSetup} saveItemSetup={saveItemSetup}/>}
+          {tab==="Analytics"&&<Analytics data={data} itemSetup={itemSetup}/>}
+          {tab==="Item Setup"&&<ItemSetup skuCatalog={skuCatalog} itemSetup={itemSetup} saveItemSetup={saveItemSetup} syncing={itemSetupSyncing}/>}
           {tab==="Manage"&&<Manage data={data} saveRow={saveRow} deleteRow={deleteRow} syncing={syncing} skuCatalog={skuCatalog}/>}
         </>}
       </div>
@@ -360,7 +371,8 @@ function Dashboard({data,alerts,setTab}){
 }
 
 // ─── SHIPMENTS ────────────────────────────────────────────
-function Shipments({data,alerts,quickStatus,setEditRow,selected,toggleSelect,toggleAll,bulkStatus,setBulkStatus,applyBulk,syncing}){
+function Shipments({data,alerts,quickStatus,setEditRow,selected,toggleSelect,toggleAll,bulkStatus,setBulkStatus,applyBulk,syncing,itemSetup}){
+  itemSetup=itemSetup||{};
   const [search,setSearch]=useState("");
   const [fStatus,setFStatus]=useState("All");
   const [fCustomer,setFCustomer]=useState("All");
@@ -447,11 +459,22 @@ function Shipments({data,alerts,quickStatus,setEditRow,selected,toggleSelect,tog
                             ))}
                           </div>
                           <div style={{fontSize:11,fontWeight:500,color:V.text2,marginBottom:5}}>SKUs ({skus.length})</div>
-                          {skus.map((s,si)=>(
-                            <div key={si} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"3px 0",borderBottom:`0.5px solid ${V.border}`}}>
-                              <span>{s.sku}</span><span style={{color:V.text2,whiteSpace:"nowrap",marginLeft:8}}>{Number(s.qty||0).toLocaleString()} {s.unit}</span>
-                            </div>
-                          ))}
+                          <div style={{display:"grid",gridTemplateColumns:"1fr auto auto auto",gap:12,padding:"3px 0",fontSize:10,color:V.text2,borderBottom:`0.5px solid ${V.border}`,marginBottom:2}}>
+                            <span>Product</span><span style={{textAlign:"right"}}>Qty</span><span style={{textAlign:"right",minWidth:80}}>Cost/Unit</span><span style={{textAlign:"right",minWidth:80}}>Line Total</span>
+                          </div>
+                          {skus.map((s,si)=>{
+                            const costPer=Number(itemSetup[s.sku]?.cost||0);
+                            const lineTotal=costPer*Number(s.qty||0);
+                            return(
+                              <div key={si} style={{display:"grid",gridTemplateColumns:"1fr auto auto auto",gap:12,fontSize:12,padding:"4px 0",borderBottom:`0.5px solid ${V.border}`,alignItems:"center"}}>
+                                <span style={{fontWeight:500}}>{s.sku}</span>
+                                <span style={{color:V.text2,whiteSpace:"nowrap",textAlign:"right"}}>{Number(s.qty||0).toLocaleString()} {s.unit}</span>
+                                <span style={{color:costPer>0?V.text:V.text2,whiteSpace:"nowrap",textAlign:"right",minWidth:80}}>{costPer>0?`$${costPer.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}`:"—"}</span>
+                                <span style={{fontWeight:costPer>0?600:400,color:costPer>0?"#059669":V.text2,whiteSpace:"nowrap",textAlign:"right",minWidth:80}}>{costPer>0?`$${lineTotal.toLocaleString(undefined,{maximumFractionDigits:0})}`:"—"}</span>
+                              </div>
+                            );
+                          })}
+                          {(()=>{const poTotal=skus.reduce((sum,s)=>sum+Number(itemSetup[s.sku]?.cost||0)*Number(s.qty||0),0);return poTotal>0?(<div style={{display:"flex",justifyContent:"flex-end",marginTop:6,fontSize:12,fontWeight:600,color:"#059669"}}>PO Product Cost: ${Math.round(poTotal).toLocaleString()}</div>):null;})()}
                         </td>
                       </tr>
                     )}
@@ -707,7 +730,8 @@ function AlertCard({a,dismiss}){
 }
 
 // ─── ANALYTICS ────────────────────────────────────────────
-function Analytics({data}){
+function Analytics({data,itemSetup}){
+  itemSetup=itemSetup||{};
   const [fC,setFC]=useState("All");
   const [fM,setFM]=useState("All");
   const [fA,setFA]=useState("All");
@@ -741,7 +765,7 @@ function Analytics({data}){
 
   const metrics=useMemo(()=>{
     const byModel={},byStatus={},byAgent={},byCustomer={},byMonth={},bySku={};
-    let totalVolume=0,totalSkuQty=0,totalFreight=0,totalDuty=0,totalDelayRisk=0,onTimeCount=0,datedTransit=0;
+    let totalVolume=0,totalSkuQty=0,totalFreight=0,totalDuty=0,totalDelayRisk=0,onTimeCount=0,datedTransit=0,totalProductCost=0;
 
     f.forEach(r=>{
       byModel[r["Shipping Model"]]=(byModel[r["Shipping Model"]]||0)+1;
@@ -781,12 +805,15 @@ function Analytics({data}){
         const sku=(s?.sku||"Unnamed SKU").trim()||"Unnamed SKU";
         const qty=num(s.qty);
         const unit=s?.unit||"units";
-        if(!bySku[sku])bySku[sku]={qty:0,shipments:new Set(),customers:new Set(),unit,estFreight:0};
+        const costPerUnit=Number(itemSetup[sku]?.cost||0);
+        if(!bySku[sku])bySku[sku]={qty:0,shipments:new Set(),customers:new Set(),unit,estFreight:0,productCost:0,costPerUnit};
         bySku[sku].qty+=qty;
         bySku[sku].shipments.add(r["LQC PO#"]);
         bySku[sku].customers.add(r["Customer"]||"Unknown");
         const allocBase=shipQty>0?qty/shipQty:0;
         bySku[sku].estFreight+=(volume*Number(freightPerCbm||0))*allocBase;
+        bySku[sku].productCost+=qty*costPerUnit;
+        totalProductCost+=qty*costPerUnit;
       });
     });
 
@@ -798,7 +825,9 @@ function Analytics({data}){
       unit:v.unit,
       shipments:v.shipments.size,
       customers:v.customers.size,
-      estFreight:v.estFreight
+      estFreight:v.estFreight,
+      productCost:v.productCost||0,
+      costPerUnit:v.costPerUnit||0
     })).sort((a,b)=>b.qty-a.qty);
 
     return {
@@ -812,10 +841,11 @@ function Analytics({data}){
         estDuty:totalDuty,
         estLanded:totalFreight+totalDuty,
         onTimeRate:datedTransit?Math.round(onTimeCount/datedTransit*100):0,
-        delayRisk:totalDelayRisk
+        delayRisk:totalDelayRisk,
+        productCost:totalProductCost
       }
     };
-  },[f,freightPerCbm,dutyPct,delayCostPerDay,dateField]);
+  },[f,freightPerCbm,dutyPct,delayCostPerDay,dateField,itemSetup]);
 
   const months=Object.keys(metrics.byMonth).sort();
   const maxM=Math.max(...Object.values(metrics.byMonth),1);
@@ -826,8 +856,9 @@ function Analytics({data}){
   const sel={fontSize:12,padding:"6px 10px",border:`0.5px solid ${V.border2}`,borderRadius:8,background:V.bg,color:V.text};
 
   const insightCards=[
-    {title:"Landed cost exposure",value:`$${Math.round(metrics.totals.estLanded).toLocaleString()}`,note:`Freight + ${dutyPct}% duty assumption`,color:"#7c3aed"},
-    {title:"Transit reliability",value:`${metrics.totals.onTimeRate}%`,note:"Shipments meeting lane benchmarks",color:"#059669"},
+    {title:"Total product cost",value:`$${Math.round(metrics.totals.productCost).toLocaleString()}`,note:"Real cost from unit prices in Item Setup",color:"#059669"},
+    {title:"Est. landed cost",value:`$${Math.round(metrics.totals.estLanded).toLocaleString()}`,note:`Est. freight + ${dutyPct}% duty`,color:"#7c3aed"},
+    {title:"Transit reliability",value:`${metrics.totals.onTimeRate}%`,note:"Shipments meeting lane benchmarks",color:"#0e7490"},
     {title:"Delay risk",value:`$${Math.round(metrics.totals.delayRisk).toLocaleString()}`,note:"Projected over-ETA holding impact",color:"#dc2626"}
   ];
 
@@ -836,7 +867,7 @@ function Analytics({data}){
       <div style={{background:"linear-gradient(135deg,#0f172a,#1e293b)",borderRadius:16,padding:18,marginBottom:16,color:"#e2e8f0",boxShadow:"0 14px 40px rgba(15,23,42,.28)"}}>
         <div style={{fontSize:11,letterSpacing:".08em",textTransform:"uppercase",opacity:.8,marginBottom:8}}>Robust analytics studio</div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(4,minmax(140px,1fr))",gap:10}}>
-          {[{l:"Filtered Shipments",v:metrics.totals.shipments},{l:"Total Volume",v:metrics.totals.volume.toLocaleString()},{l:"SKU Units",v:Math.round(metrics.totals.skuQty).toLocaleString()},{l:"Est. Freight",v:`$${Math.round(metrics.totals.estFreight).toLocaleString()}`}].map(c=>(
+          {[{l:"Filtered Shipments",v:metrics.totals.shipments},{l:"Total Volume (CBM)",v:metrics.totals.volume.toLocaleString()},{l:"Total SKU Units",v:Math.round(metrics.totals.skuQty).toLocaleString()},{l:"Product Cost",v:`$${Math.round(metrics.totals.productCost).toLocaleString()}`}].map(c=>(
             <div key={c.l} style={{background:"rgba(148,163,184,.15)",border:"1px solid rgba(148,163,184,.2)",borderRadius:10,padding:"10px 12px"}}>
               <div style={{fontSize:10,opacity:.75,marginBottom:3}}>{c.l}</div>
               <div style={{fontSize:22,fontWeight:600,color:"#f8fafc"}}>{c.v}</div>
@@ -936,7 +967,7 @@ function Analytics({data}){
           <table style={{width:"100%",borderCollapse:"collapse",minWidth:780}}>
             <thead>
               <tr style={{background:V.bg2,fontSize:11,color:V.text2}}>
-                {["SKU / Product","Qty","Shipments","Customers","Est. Freight Allocation","Contribution"].map(h=><th key={h} style={{textAlign:"left",padding:"8px 12px",borderBottom:`0.5px solid ${V.border}`,fontWeight:600}}>{h}</th>)}
+                {["SKU / Product","Qty","Shipments","Customers","Cost/Unit","Product Cost","Est. Freight","Contribution"].map(h=><th key={h} style={{textAlign:"left",padding:"8px 12px",borderBottom:`0.5px solid ${V.border}`,fontWeight:600}}>{h}</th>)}
               </tr>
             </thead>
             <tbody>
@@ -948,8 +979,10 @@ function Analytics({data}){
                     <td style={{padding:"8px 12px"}}>{Math.round(r.qty).toLocaleString()} {r.unit}</td>
                     <td style={{padding:"8px 12px"}}>{r.shipments}</td>
                     <td style={{padding:"8px 12px"}}>{r.customers}</td>
-                    <td style={{padding:"8px 12px"}}>${Math.round(r.estFreight).toLocaleString()}</td>
-                    <td style={{padding:"8px 12px"}}><span style={{padding:"2px 8px",borderRadius:999,background:"#e0f2fe",color:"#0369a1",fontSize:11,fontWeight:600}}>{pct}% of units</span></td>
+                    <td style={{padding:"8px 12px",color:r.costPerUnit>0?V.text:V.text2}}>{r.costPerUnit>0?`$${Number(r.costPerUnit).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}`:"—"}</td>
+                    <td style={{padding:"8px 12px",fontWeight:r.productCost>0?600:400,color:r.productCost>0?"#059669":V.text2}}>{r.productCost>0?`$${Math.round(r.productCost).toLocaleString()}`:"—"}</td>
+                    <td style={{padding:"8px 12px",color:V.text2}}>${Math.round(r.estFreight).toLocaleString()}</td>
+                    <td style={{padding:"8px 12px"}}><span style={{padding:"2px 8px",borderRadius:999,background:"#e0f2fe",color:"#0369a1",fontSize:11,fontWeight:600}}>{pct}%</span></td>
                   </tr>
                 );
               })}
@@ -973,13 +1006,13 @@ function RowBar({label,value,max,color}){
   );
 }
 // ─── ITEM SETUP ───────────────────────────────────────────
-function ItemSetup({skuCatalog,itemSetup,saveItemSetup}){
+function ItemSetup({skuCatalog,itemSetup,saveItemSetup,syncing}){
   const [draft,setDraft]=useState(()=>({...itemSetup}));
   const [saved,setSaved]=useState(false);
   const [newSku,setNewSku]=useState("");
   const allSkus=useMemo(()=>{const set=new Set([...skuCatalog,...Object.keys(draft)]);return [...set].sort((a,b)=>a.localeCompare(b));},[skuCatalog,draft]);
   function setField(sku,field,val){setDraft(d=>{const prev=d[sku]||{cost:"",customsPct:""};return{...d,[sku]:{...prev,[field]:val}};});setSaved(false);}
-  function handleSave(){const clean={};Object.entries(draft).forEach(([sku,vals])=>{if(vals.cost!==""||vals.customsPct!=="")clean[sku]=vals;});saveItemSetup(clean);setDraft(clean);setSaved(true);setTimeout(()=>setSaved(false),2500);}
+  async function handleSave(){const clean={};Object.entries(draft).forEach(([sku,vals])=>{if(vals.cost!==""||vals.customsPct!=="")clean[sku]=vals;});await saveItemSetup(clean);setDraft(clean);setSaved(true);setTimeout(()=>setSaved(false),2500);}
   function addManualSku(){const name=newSku.trim();if(!name)return;setDraft(d=>({...d,[name]:d[name]||{cost:"",customsPct:""}}));setNewSku("");setSaved(false);}
   function removeSku(sku){setDraft(d=>{const n={...d};delete n[sku];return n;});setSaved(false);}
   const fld={fontSize:13,padding:"5px 8px",border:`0.5px solid ${V.border2}`,borderRadius:6,background:V.bg,color:V.text,width:"100%",boxSizing:"border-box"};
@@ -988,9 +1021,9 @@ function ItemSetup({skuCatalog,itemSetup,saveItemSetup}){
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
         <div>
           <h2 style={{fontSize:18,fontWeight:500,margin:0,marginBottom:4}}>Item Setup</h2>
-          <p style={{fontSize:13,color:V.text2,margin:0}}>Set a unit cost and customs duty percentage for each product. These values are saved locally and used across the app.</p>
+          <p style={{fontSize:13,color:V.text2,margin:0}}>Set a unit cost and customs duty percentage for each product. Values sync to your Google Sheet and are shared across all devices.</p>
         </div>
-        <button onClick={handleSave} style={{fontSize:13,padding:"7px 20px",border:"none",borderRadius:8,background:"#b45309",color:"#fff",cursor:"pointer",fontWeight:500,flexShrink:0,marginLeft:16}}>{saved?"✓ Saved":"Save changes"}</button>
+        <button onClick={handleSave} disabled={syncing} style={{fontSize:13,padding:"7px 20px",border:"none",borderRadius:8,background:syncing?"#92400e":"#b45309",color:"#fff",cursor:syncing?"default":"pointer",fontWeight:500,flexShrink:0,marginLeft:16}}>{syncing?"Syncing to Sheet…":saved?"✓ Saved":"Save changes"}</button>
       </div>
       <div style={{display:"flex",gap:8,marginBottom:18,marginTop:16}}>
         <input value={newSku} onChange={e=>setNewSku(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addManualSku()} placeholder="Add a product not yet in a shipment…" style={{...fld,flex:1,padding:"7px 10px"}}/>
