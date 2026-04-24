@@ -423,14 +423,16 @@ function Dashboard({data,alerts,setTab,itemSetup,setEditRow}){
           const isOpen=drill===c.key;
           return(
             <div key={c.key} onClick={()=>setDrill(isOpen?null:c.key)} className="kpi-card"
-              style={{background:V.bg,borderRadius:16,padding:"20px 20px 18px",cursor:"pointer",position:"relative",overflow:"hidden",
-                border:isOpen?`1.5px solid ${c.color}`:`1px solid ${V.border}`,
-                boxShadow:isOpen?`0 0 0 4px ${c.color}18,0 8px 32px rgba(15,23,42,0.1)`:"0 1px 3px rgba(15,23,42,0.08),0 4px 16px rgba(15,23,42,0.04)"}}>
-              <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:c.color,borderRadius:"16px 16px 0 0",opacity:isOpen?1:0.65}}/>
-              <div style={{fontSize:9,fontWeight:700,color:V.text2,textTransform:"uppercase",letterSpacing:".1em",marginBottom:14}}>{c.label}</div>
-              <div style={{fontSize:34,fontWeight:800,color:isOpen?c.color:V.text,lineHeight:1,marginBottom:8,letterSpacing:"-0.03em"}}>{c.value}</div>
+              style={{
+                background:isOpen?`linear-gradient(145deg,#fff,${c.color}10)`:`linear-gradient(145deg,#fff,${c.color}06)`,
+                borderRadius:16,padding:"20px 20px 18px",cursor:"pointer",position:"relative",overflow:"hidden",
+                border:`1px solid ${isOpen?c.color+"50":V.border}`,
+                boxShadow:isOpen?`0 0 0 3px ${c.color}14,0 8px 28px ${c.color}16`:`0 1px 3px rgba(15,23,42,0.07),0 4px 14px rgba(15,23,42,0.04)`}}>
+              <div style={{position:"absolute",top:14,right:14,width:7,height:7,borderRadius:"50%",background:c.color,opacity:isOpen?1:0.3,transition:"opacity 0.15s"}}/>
+              <div style={{fontSize:9,fontWeight:700,color:V.text2,textTransform:"uppercase",letterSpacing:".1em",marginBottom:14,paddingRight:16}}>{c.label}</div>
+              <div style={{fontSize:34,fontWeight:800,color:c.color,lineHeight:1,marginBottom:8,letterSpacing:"-0.03em"}}>{c.value}</div>
               <div style={{fontSize:11,color:V.text2}}>{c.sub}</div>
-              {isOpen&&<div style={{position:"absolute",bottom:12,right:14,fontSize:10,color:c.color,fontWeight:700}}>▲ close</div>}
+              {isOpen&&<div style={{position:"absolute",bottom:12,right:14,fontSize:9,color:c.color,fontWeight:700}}>▲ close</div>}
             </div>
           );
         })}
@@ -446,9 +448,10 @@ function Dashboard({data,alerts,setTab,itemSetup,setEditRow}){
         <div style={{fontSize:9,fontWeight:700,color:V.text2,textTransform:"uppercase",letterSpacing:".1em",marginBottom:12}}>Financial Snapshot — Active Orders</div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12}}>
           {[{l:"Product Cost",v:fmt$(fin.productCost),c:"#10b981",n:`${active.length} active orders`},{l:"Container Cost",v:fmt$(fin.containerCost),c:"#f97316",n:"Direct freight"},{l:"Drayage",v:fmt$(fin.drayage),c:"#8b5cf6",n:"Port to warehouse"},{l:"Total In-Flight",v:fmt$(fin.total),c:"#3b82f6",n:"All cost components"}].map(f=>(
-            <div key={f.l} className="stat-card" style={{background:V.bg,border:`1px solid ${V.border}`,borderRadius:14,padding:"16px 18px",boxShadow:"0 1px 4px rgba(15,23,42,0.07)",borderTop:`3px solid ${f.c}`,transition:"box-shadow 0.15s"}}>
-              <div style={{fontSize:9,fontWeight:700,color:f.c,textTransform:"uppercase",letterSpacing:".1em",marginBottom:10}}>{f.l}</div>
-              <div style={{fontSize:24,fontWeight:700,color:V.text,marginBottom:4,letterSpacing:"-0.02em"}}>{f.v}</div>
+            <div key={f.l} className="stat-card" style={{background:`linear-gradient(145deg,#fff,${f.c}07)`,border:`1px solid ${V.border}`,borderRadius:14,padding:"16px 18px",boxShadow:"0 1px 4px rgba(15,23,42,0.07)",position:"relative",overflow:"hidden",transition:"box-shadow 0.15s"}}>
+              <div style={{position:"absolute",top:13,right:13,width:6,height:6,borderRadius:"50%",background:f.c,opacity:0.4}}/>
+              <div style={{fontSize:9,fontWeight:700,color:V.text2,textTransform:"uppercase",letterSpacing:".1em",marginBottom:10}}>{f.l}</div>
+              <div style={{fontSize:24,fontWeight:700,color:f.c,marginBottom:4,letterSpacing:"-0.02em"}}>{f.v}</div>
               <div style={{fontSize:11,color:V.text2}}>{f.n}</div>
             </div>
           ))}
@@ -1025,9 +1028,14 @@ function AlertsTab({alerts,allAlerts,typeFilter,setTypeFilter,dismiss,dismissAll
       <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:10,marginBottom:16}}>
         {[{l:"ETA Overdue",t:"overdue",c:"#dc2626"},{l:"Transit Exceeded",t:"transit",c:"#dc2626"},{l:"ETD Approaching",t:"etd",c:"#b45309"},{l:"ETA Approaching",t:"eta",c:"#b45309"},{l:"MABD at Risk",t:"mabd",c:"#7c3aed"}].map(c=>{
           const count=allAlerts.filter(a=>a.type===c.t).length;
-          return<button key={c.t} onClick={()=>setTypeFilter(typeFilter===c.t?"All":c.t)} style={{background:typeFilter===c.t?`${c.c}15`:V.bg,border:`0.5px solid ${typeFilter===c.t?c.c:V.border}`,borderRadius:8,padding:"10px 12px",cursor:"pointer",textAlign:"left"}}>
-            <div style={{fontSize:20,fontWeight:500,color:count>0?c.c:V.text2}}>{count}</div>
-            <div style={{fontSize:11,color:V.text2,marginTop:2}}>{c.l}</div>
+          const isOn=typeFilter===c.t;
+          return<button key={c.t} onClick={()=>setTypeFilter(isOn?"All":c.t)}
+            style={{background:isOn?`linear-gradient(145deg,#fff,${c.c}12)`:`linear-gradient(145deg,#fff,${c.c}05)`,
+              border:`1px solid ${isOn?c.c+"55":V.border}`,borderRadius:12,padding:"14px 14px",cursor:"pointer",textAlign:"left",position:"relative",overflow:"hidden",
+              boxShadow:isOn?`0 0 0 2px ${c.c}18,0 4px 16px ${c.c}14`:"0 1px 3px rgba(15,23,42,0.07)"}}>
+            <div style={{position:"absolute",top:10,right:10,width:6,height:6,borderRadius:"50%",background:c.c,opacity:isOn?1:count>0?0.4:0.15}}/>
+            <div style={{fontSize:26,fontWeight:800,color:count>0?c.c:V.text2,letterSpacing:"-0.02em",lineHeight:1,marginBottom:6}}>{count}</div>
+            <div style={{fontSize:11,color:V.text2,fontWeight:500}}>{c.l}</div>
           </button>;
         })}
       </div>
@@ -1236,9 +1244,13 @@ function Analytics({data,itemSetup}){
           const active=drill?.title===k.label;
           return(
             <div key={k.key} onClick={()=>active?setDrill(null):openDrill(k.label,k.rows)} className="kpi-card"
-              style={{background:V.bg,border:`1px solid ${active?k.color:V.border}`,borderRadius:14,padding:"16px 14px",borderTop:`3px solid ${active?k.color:k.color+"aa"}`,cursor:"pointer",
-                boxShadow:active?`0 0 0 3px ${k.color}22,0 6px 24px rgba(15,23,42,0.1)`:"0 1px 3px rgba(15,23,42,0.07)"}}>
-              <div style={{fontSize:9,fontWeight:700,color:V.text2,textTransform:"uppercase",letterSpacing:".09em",marginBottom:10,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{k.label}</div>
+              style={{
+                background:active?`linear-gradient(145deg,#fff,${k.color}10)`:`linear-gradient(145deg,#fff,${k.color}05)`,
+                border:`1px solid ${active?k.color+"50":V.border}`,
+                borderRadius:14,padding:"16px 14px",cursor:"pointer",position:"relative",overflow:"hidden",
+                boxShadow:active?`0 0 0 3px ${k.color}14,0 6px 24px ${k.color}14`:"0 1px 3px rgba(15,23,42,0.07)"}}>
+              <div style={{position:"absolute",top:12,right:12,width:6,height:6,borderRadius:"50%",background:k.color,opacity:active?1:0.28}}/>
+              <div style={{fontSize:9,fontWeight:700,color:V.text2,textTransform:"uppercase",letterSpacing:".09em",marginBottom:10,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",paddingRight:14}}>{k.label}</div>
               <div style={{fontSize:22,fontWeight:800,color:k.color,lineHeight:1,marginBottom:5,letterSpacing:"-0.02em"}}>{k.value}</div>
               <div style={{fontSize:10,color:V.text2,lineHeight:1.4}}>{k.sub}</div>
               <div style={{fontSize:9,color:active?k.color:V.text2,marginTop:6,fontWeight:active?600:400}}>{active?"▲ close":"↓ drill"}</div>
