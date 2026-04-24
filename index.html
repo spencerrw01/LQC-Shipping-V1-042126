@@ -156,7 +156,13 @@ function App(){
     setLoading(true);setSyncErr(false);
     try{
       const [res,setupRes]=await Promise.all([apiGet("getAll"),apiGet("getItemSetup")]);
-      if(res.shipments){setData(res.shipments);setLastSync(new Date());}
+      if(res.shipments){
+        try{
+          const lcc=JSON.parse(localStorage.getItem("lqc_costs")||"{}");
+          setData(res.shipments.map(r=>{const lc=lcc[r["LQC PO#"]]||{};return{...r,"Container Cost":r["Container Cost"]||lc["Container Cost"]||"","Drayage":r["Drayage"]||lc["Drayage"]||""};}));
+        }catch{setData(res.shipments);}
+        setLastSync(new Date());
+      }
       else setSyncErr(true);
       if(setupRes?.itemSetup&&typeof setupRes.itemSetup==="object"){
         setItemSetup(setupRes.itemSetup);
@@ -190,12 +196,14 @@ function App(){
 
   async function saveRow(row){
     setSyncing(true);
+    try{const po=row["LQC PO#"];if(po){const lcc=JSON.parse(localStorage.getItem("lqc_costs")||"{}");lcc[po]={"Container Cost":row["Container Cost"]||"","Drayage":row["Drayage"]||""};localStorage.setItem("lqc_costs",JSON.stringify(lcc));}}catch{}
     try{await apiPost({action:"save",row});}catch{}
     setSyncing(false);
     await loadData();
   }
   async function deleteRow(po){
     setSyncing(true);
+    try{const lcc=JSON.parse(localStorage.getItem("lqc_costs")||"{}");delete lcc[po];localStorage.setItem("lqc_costs",JSON.stringify(lcc));}catch{}
     try{await apiPost({action:"delete",po});}catch{}
     setSyncing(false);
     await loadData();
