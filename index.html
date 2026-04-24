@@ -37,7 +37,13 @@ const LANE_DAYS = {east:55,west:30,gulf:40,default:45};
 const WAREHOUSE_LOCATIONS=["Unitrans - PA","Unitrans - MA","RJW - TX","RJW - PA","Direct to Client","Other"];
 const INTERNAL_LOCS=new Set(["Unitrans - PA","Unitrans - MA","RJW - TX","RJW - PA","Unitrans","RJW"]);
 const WARN_DAYS = 3;
-const TABS = ["Dashboard","Shipments","SKU Search","Timeline","Calendar","Alerts","Analytics","Item Setup","Manage"];
+const TABS = ["Dashboard","Shipments","SKU Search","Timeline","Calendar","Alerts","Analytics","Item Setup","Locations","Manage"];
+const DEFAULT_LOCS=[
+  {id:"loc1",name:"Unitrans - PA",code:"UT-PA",type:"Warehouse",city:"",state:"PA",address:"",contact:"",phone:"",email:"",notes:"",customers:[]},
+  {id:"loc2",name:"Unitrans - MA",code:"UT-MA",type:"Warehouse",city:"",state:"MA",address:"",contact:"",phone:"",email:"",notes:"",customers:[]},
+  {id:"loc3",name:"RJW - TX",code:"RJW-TX",type:"Warehouse",city:"",state:"TX",address:"",contact:"",phone:"",email:"",notes:"",customers:[]},
+  {id:"loc4",name:"RJW - PA",code:"RJW-PA",type:"Warehouse",city:"",state:"PA",address:"",contact:"",phone:"",email:"",notes:"",customers:[]},
+];
 
 const V = {
   bg:"#ffffff", bg2:"#f8fafc", bg3:"#f1f5f9",
@@ -132,6 +138,8 @@ function App(){
   const [lastSync,setLastSync]=useState(null);
   const [itemSetup,setItemSetup]=useState(()=>{try{return JSON.parse(localStorage.getItem("lqc_item_setup")||"{}");}catch{return{};}});
   const [itemSetupSyncing,setItemSetupSyncing]=useState(false);
+  const [locations,setLocations]=useState(()=>{try{const s=JSON.parse(localStorage.getItem("lqc_locations")||"null");return s&&s.length>0?s:DEFAULT_LOCS;}catch{return DEFAULT_LOCS;}});
+  function saveLocations(updated){setLocations(updated);localStorage.setItem("lqc_locations",JSON.stringify(updated));}
 
   async function saveItemSetup(updated){
     setItemSetup(updated);
@@ -280,7 +288,7 @@ function App(){
       <div style={{flex:1,overflow:"auto"}} onClick={()=>bellOpen&&setBellOpen(false)}>
         {loading&&data.length===0&&<LoadingScreen/>}
         {(!loading||data.length>0)&&<>
-          {tab==="Dashboard"&&<Dashboard data={data} alerts={alerts} setTab={setTab} itemSetup={itemSetup}/>}
+          {tab==="Dashboard"&&<Dashboard data={data} alerts={alerts} setTab={setTab} itemSetup={itemSetup} setEditRow={setEditRow}/>}
           {tab==="Shipments"&&<Shipments data={data} alerts={alerts} quickStatus={quickStatus} setEditRow={setEditRow} selected={selected} toggleSelect={toggleSelect} toggleAll={toggleAll} bulkStatus={bulkStatus} setBulkStatus={setBulkStatus} applyBulk={applyBulk} syncing={syncing} itemSetup={itemSetup}/>}
           {tab==="SKU Search"&&<SKUSearch data={data} alerts={alerts} itemSetup={itemSetup}/>}
           {tab==="Timeline"&&<Timeline data={data} alerts={alerts}/>}
@@ -288,11 +296,12 @@ function App(){
           {tab==="Alerts"&&<AlertsTab alerts={alerts.filter(a=>alertTypeFilter==="All"||a.type===alertTypeFilter)} allAlerts={alerts} typeFilter={alertTypeFilter} setTypeFilter={setAlertTypeFilter} dismiss={dismiss} dismissAll={dismissAll} dismissed={dismissed} saveDismissed={saveDismissed}/>}
           {tab==="Analytics"&&<Analytics data={data} itemSetup={itemSetup}/>}
           {tab==="Item Setup"&&<ItemSetup skuCatalog={skuCatalog} itemSetup={itemSetup} saveItemSetup={saveItemSetup} syncing={itemSetupSyncing}/>}
-          {tab==="Manage"&&<Manage data={data} saveRow={saveRow} deleteRow={deleteRow} syncing={syncing} skuCatalog={skuCatalog}/>}
+          {tab==="Locations"&&<LocationSetup locations={locations} saveLocations={saveLocations} data={data}/>}
+          {tab==="Manage"&&<Manage data={data} saveRow={saveRow} deleteRow={deleteRow} syncing={syncing} skuCatalog={skuCatalog} locations={locations}/>}
         </>}
       </div>
 
-      {editRow&&<EditModal row={editRow} onSave={async(r)=>{await saveRow(r);setEditRow(null);}} onClose={()=>setEditRow(null)} syncing={syncing} skuCatalog={skuCatalog}/>}
+      {editRow&&<EditModal row={editRow} onSave={async(r)=>{await saveRow(r);setEditRow(null);}} onClose={()=>setEditRow(null)} syncing={syncing} skuCatalog={skuCatalog} itemSetup={itemSetup} locations={locations}/>}
       {syncing&&<div style={{position:"fixed",bottom:16,right:16,background:"#b45309",color:"#fff",fontSize:12,padding:"6px 14px",borderRadius:20,fontWeight:500,zIndex:9999}}>Saving to Google Sheet…</div>}
     </div>
   );
@@ -308,7 +317,7 @@ function LoadingScreen(){
 }
 
 // ─── DASHBOARD ────────────────────────────────────────────
-function Dashboard({data,alerts,setTab,itemSetup}){
+function Dashboard({data,alerts,setTab,itemSetup,setEditRow}){
   itemSetup=itemSetup||{};
   const [drill,setDrill]=useState(null);
   const num=v=>{const n=Number(String(v??"").replace(/[^0-9.-]/g,""));return Number.isFinite(n)?n:0;};
@@ -401,7 +410,7 @@ function Dashboard({data,alerts,setTab,itemSetup}){
             const urgent=d<=3;const loc=r["Landing Location"]||r["Destination"]||r["POD"]||"—";
             const isInternal=INTERNAL_LOCS.has(loc)||WAREHOUSE_LOCATIONS.slice(0,4).some(w=>loc.toLowerCase().includes(w.toLowerCase().split(" ")[0]));
             return(
-              <div key={r["LQC PO#"]} style={{background:V.bg,borderRadius:11,padding:"12px 14px",cursor:"default",
+              <div key={r["LQC PO#"]} onClick={setEditRow?()=>setEditRow(r):undefined} style={{background:V.bg,borderRadius:11,padding:"12px 14px",cursor:setEditRow?"pointer":"default",
                 border:`1px solid ${ha?"#fbbf24":urgent?"#fed7aa":V.border}`,
                 borderTop:`3px solid ${urgent?"#ef4444":d<=7?"#f97316":"#94a3b8"}`,
                 boxShadow:"0 1px 6px rgba(0,0,0,.06)"}}>
@@ -1445,7 +1454,7 @@ function ItemSetup({skuCatalog,itemSetup,saveItemSetup,syncing}){
 
 
 // ─── MANAGE ───────────────────────────────────────────────
-function Manage({data,saveRow,deleteRow,syncing,skuCatalog}){
+function Manage({data,saveRow,deleteRow,syncing,skuCatalog,locations}){
   const [mode,setMode]=useState("list");
   const [newRow,setNewRow]=useState(null);
   const blank=()=>({
@@ -1463,7 +1472,7 @@ function Manage({data,saveRow,deleteRow,syncing,skuCatalog}){
         <button onClick={()=>{setMode("list");setNewRow(null);}} style={{fontSize:12,padding:"5px 12px",border:`0.5px solid ${V.border2}`,borderRadius:6,background:"transparent",cursor:"pointer",color:V.text}}>← Back</button>
         <span style={{fontSize:16,fontWeight:500}}>New shipment</span>
       </div>
-      <ShipmentForm row={newRow} setRow={setNewRow} onSave={handleSave} onCancel={()=>{setMode("list");setNewRow(null);}} syncing={syncing} skuCatalog={skuCatalog}/>
+      <ShipmentForm row={newRow} setRow={setNewRow} onSave={handleSave} onCancel={()=>{setMode("list");setNewRow(null);}} syncing={syncing} skuCatalog={skuCatalog} locations={locations}/>
     </div>
   );
   return(
@@ -1500,7 +1509,8 @@ function SkuAutocompleteInput({value,onChange,options,placeholder,style}){
 }
 
 const CONTAINER_CBM={"20ft":25,"40ft":55,"40ft HC":60,"45ft HC":72};
-function ShipmentForm({row,setRow,onSave,onCancel,syncing,skuCatalog}){
+function ShipmentForm({row,setRow,onSave,onCancel,syncing,skuCatalog,locations}){
+  const locNames=locations&&locations.length>0?locations.map(l=>l.name):WAREHOUSE_LOCATIONS;
   const set=(k,v)=>setRow(r=>({...r,[k]:v}));
   const setSku=(i,k,v)=>setRow(r=>{const s=[...r["SKUs"]];s[i]={...s[i],[k]:v};return{...r,"SKUs":s};});
   function setContainer(k,v){
@@ -1526,7 +1536,7 @@ function ShipmentForm({row,setRow,onSave,onCancel,syncing,skuCatalog}){
         <div style={{gridColumn:"1 / -1"}}><label style={lbl}>Landing Location <span style={{fontSize:10,color:"#0e7490",fontWeight:600,background:"rgba(14,116,144,.1)",borderRadius:3,padding:"1px 5px",marginLeft:4}}>WH</span></label>
           <select value={row["Landing Location"]||""} onChange={e=>set("Landing Location",e.target.value)} style={fld}>
             <option value="">Select warehouse / destination…</option>
-            {WAREHOUSE_LOCATIONS.map(l=><option key={l}>{l}</option>)}
+            {locNames.map(l=><option key={l}>{l}</option>)}
           </select>
         </div>
       </div>
@@ -1562,72 +1572,354 @@ function ShipmentForm({row,setRow,onSave,onCancel,syncing,skuCatalog}){
   );
 }
 
-// ─── EDIT MODAL ───────────────────────────────────────────
-function EditModal({row,onSave,onClose,syncing,skuCatalog}){
+// ─── EDIT MODAL (ERP Shipment File) ──────────────────────
+function EditModal({row,onSave,onClose,syncing,skuCatalog,itemSetup,locations}){
+  itemSetup=itemSetup||{};
+  const locNames=locations&&locations.length>0?locations.map(l=>l.name):WAREHOUSE_LOCATIONS;
   const [r,setR]=useState({...row,SKUs:Array.isArray(row["SKUs"])?[...row["SKUs"].map(s=>({...s}))]:[{sku:"",qty:"",unit:"CTN"}]});
   const set=(k,v)=>setR(p=>({...p,[k]:v}));
   const setSku=(i,k,v)=>setR(p=>{const s=[...p.SKUs];s[i]={...s[i],[k]:v};return{...p,SKUs:s};});
-  function setContainer(k,v){
-    setR(p=>{
-      const updated={...p,[k]:v};
-      const qty=k==="Container Qty"?Number(v):Number(p["Container Qty"]||0);
-      const size=k==="Container Size"?v:(p["Container Size"]||"");
-      const cbm=CONTAINER_CBM[size];
-      if(qty>0&&cbm)updated["Volume"]=String(qty*cbm);
-      return updated;
+  function setContainer(k,v){setR(p=>{const u={...p,[k]:v};const qty=k==="Container Qty"?Number(v):Number(p["Container Qty"]||0);const size=k==="Container Size"?v:(p["Container Size"]||"");const cbm=CONTAINER_CBM[size];if(qty>0&&cbm)u["Volume"]=String(qty*cbm);return u;});}
+  function handleSave(){onSave({...r,SKUs:r.SKUs});}
+  const num=v=>{const n=Number(String(v??"").replace(/[^0-9.-]/g,""));return Number.isFinite(n)?n:0;};
+  const totalPC=r.SKUs.reduce((s,sk)=>s+num(sk.qty)*Number(itemSetup[sk.sku]?.cost||0),0);
+  const etd=parseDate(r["ETD"]),eta=parseDate(r["ETA"]);
+  const transitDays=etd&&eta?Math.round((eta-etd)/86400000):null;
+  const dta=eta?daysDiff(eta):null;
+  const statusIdx=STATUSES.indexOf(r["Status"]);
+  const fld={width:"100%",fontSize:13,padding:"7px 10px",border:`1px solid ${V.border2}`,borderRadius:7,background:V.bg,color:V.text,boxSizing:"border-box"};
+  const lbl={fontSize:10,fontWeight:700,color:V.text2,marginBottom:4,display:"block",textTransform:"uppercase",letterSpacing:".05em"};
+  const sec={background:V.bg,border:`1px solid ${V.border}`,borderRadius:10,padding:"16px 18px",boxShadow:"0 1px 4px rgba(0,0,0,.05)"};
+  return(
+    <div className="modal-overlay" style={{alignItems:"flex-start",paddingTop:20}}>
+      <div style={{background:V.bg3,borderRadius:16,border:`1px solid ${V.border}`,width:1000,maxWidth:"96vw",maxHeight:"92vh",overflow:"auto",boxShadow:"0 12px 48px rgba(0,0,0,.2)"}}>
+        {/* DARK HEADER */}
+        <div style={{background:"linear-gradient(135deg,#1e293b 0%,#334155 100%)",borderRadius:"16px 16px 0 0",padding:"20px 24px"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14}}>
+            <div>
+              <div style={{fontSize:10,fontWeight:700,color:"#64748b",textTransform:"uppercase",letterSpacing:".12em",marginBottom:4}}>Shipment File</div>
+              <div style={{fontSize:26,fontWeight:800,color:"#f8fafc",letterSpacing:"-0.02em",marginBottom:4}}>{r["LQC PO#"]}</div>
+              <div style={{fontSize:14,color:"#94a3b8"}}>{r["Customer"]}{r["Customer PO"]&&<span style={{color:"#64748b",marginLeft:8}}>· {r["Customer PO"]}</span>}</div>
+            </div>
+            <div style={{display:"flex",gap:10,alignItems:"flex-start",flexShrink:0}}>
+              {dta!==null&&<div style={{fontSize:11,fontWeight:700,padding:"6px 12px",borderRadius:8,background:"rgba(255,255,255,.08)",color:dta<0?"#f87171":dta<=3?"#fbbf24":"#86efac",whiteSpace:"nowrap"}}>{dta<0?`${Math.abs(dta)}d overdue`:dta===0?"Today":dta===1?"Tomorrow":`${dta}d to ETA`}</div>}
+              <button onClick={onClose} style={{fontSize:18,border:"1px solid rgba(255,255,255,.2)",background:"rgba(255,255,255,.08)",cursor:"pointer",color:"#94a3b8",borderRadius:8,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center"}}>×</button>
+            </div>
+          </div>
+          {/* STATUS TIMELINE */}
+          <div style={{display:"flex",alignItems:"center",gap:0,overflowX:"auto",paddingBottom:2}}>
+            {STATUSES.map((s,i)=>{
+              const past=i<statusIdx,curr=i===statusIdx;
+              return(<React.Fragment key={s}>
+                <div onClick={()=>set("Status",s)} style={{fontSize:10,padding:"4px 10px",borderRadius:4,cursor:"pointer",whiteSpace:"nowrap",
+                  background:curr?"rgba(255,255,255,.22)":past?"rgba(255,255,255,.08)":"transparent",
+                  color:curr?"#fff":past?"#94a3b8":"#475569",fontWeight:curr?700:400,
+                  border:`1px solid ${curr?"rgba(255,255,255,.35)":past?"rgba(255,255,255,.12)":"rgba(255,255,255,.07)"}`,transition:"all 0.1s"}}>
+                  {curr?"◉ ":past?"✓ ":"○ "}{s}
+                </div>
+                {i<STATUSES.length-1&&<div style={{width:14,height:1,background:"rgba(255,255,255,.12)",flexShrink:0}}/>}
+              </React.Fragment>);
+            })}
+          </div>
+        </div>
+        {/* BODY */}
+        <div style={{padding:"20px 24px",display:"flex",flexDirection:"column",gap:14}}>
+          {/* 3-COLUMN GRID */}
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:14}}>
+            {/* SHIPMENT DETAILS */}
+            <div style={sec}>
+              <div style={{fontSize:10,fontWeight:700,color:"#b45309",textTransform:"uppercase",letterSpacing:".07em",marginBottom:12,paddingBottom:8,borderBottom:`1px solid ${V.border}`}}>Shipment Details</div>
+              {[["Customer","Customer"],["Customer PO","Customer PO"],["ETD","ETD","date"],["ETA","ETA","date"],["MABD","MABD","date"],["Agent","Agent"]].map(([l,k,t])=>(
+                <div key={k} style={{marginBottom:9}}><label style={lbl}>{l}</label><input type={t||"text"} value={r[k]||""} onChange={e=>set(k,e.target.value)} style={fld}/></div>
+              ))}
+              {transitDays!==null&&<div style={{fontSize:11,color:V.text2,marginTop:4,padding:"6px 10px",background:V.bg3,borderRadius:6}}>Transit: <strong style={{color:V.text}}>{transitDays} days</strong></div>}
+            </div>
+            {/* CONTAINER */}
+            <div style={sec}>
+              <div style={{fontSize:10,fontWeight:700,color:"#7c3aed",textTransform:"uppercase",letterSpacing:".07em",marginBottom:12,paddingBottom:8,borderBottom:`1px solid ${V.border}`}}>Container & Freight</div>
+              <div style={{marginBottom:9}}><label style={lbl}># of Containers</label><input type="number" min="1" value={r["Container Qty"]||""} onChange={e=>setContainer("Container Qty",e.target.value)} style={fld}/></div>
+              <div style={{marginBottom:9}}><label style={lbl}>Container Size</label>
+                <select value={r["Container Size"]||""} onChange={e=>setContainer("Container Size",e.target.value)} style={fld}>
+                  <option value="">Select size…</option>
+                  {["20ft","40ft","40ft HC","45ft HC"].map(s=><option key={s}>{s}</option>)}
+                </select>
+              </div>
+              <div style={{marginBottom:9}}><label style={lbl}>Volume (CBM)</label><input type="number" value={r["Volume"]||""} onChange={e=>set("Volume",e.target.value)} placeholder="Auto-calculated" style={fld}/></div>
+              {[["Container #","Container #"],["BOL #","BOL #"],["O/F","O/F"],["Invoice #","Invoice #"]].map(([l,k])=>(
+                <div key={k} style={{marginBottom:9}}><label style={lbl}>{l}</label><input value={r[k]||""} onChange={e=>set(k,e.target.value)} style={fld}/></div>
+              ))}
+            </div>
+            {/* ROUTING & COST */}
+            <div style={sec}>
+              <div style={{fontSize:10,fontWeight:700,color:"#0e7490",textTransform:"uppercase",letterSpacing:".07em",marginBottom:12,paddingBottom:8,borderBottom:`1px solid ${V.border}`}}>Routing & Cost</div>
+              <div style={{marginBottom:9}}><label style={lbl}>Shipping Model</label>
+                <select value={r["Shipping Model"]||""} onChange={e=>set("Shipping Model",e.target.value)} style={fld}>{["Direct to Client","US Warehouse","Port Pickup"].map(m=><option key={m}>{m}</option>)}</select>
+              </div>
+              <div style={{marginBottom:9}}><label style={lbl}>POD (Port of Discharge)</label><input value={r["POD"]||""} onChange={e=>set("POD",e.target.value)} style={fld}/></div>
+              <div style={{marginBottom:9}}>
+                <label style={lbl}>Landing Location <span style={{fontSize:9,background:"rgba(14,116,144,.15)",color:"#0e7490",borderRadius:3,padding:"1px 4px",fontWeight:700,marginLeft:3}}>WH</span></label>
+                <select value={r["Landing Location"]||""} onChange={e=>set("Landing Location",e.target.value)} style={fld}>
+                  <option value="">Select location…</option>
+                  {locNames.map(l=><option key={l}>{l}</option>)}
+                </select>
+              </div>
+              <div style={{marginBottom:9}}><label style={lbl}>Final Destination</label><input value={r["Destination"]||""} onChange={e=>set("Destination",e.target.value)} style={fld}/></div>
+              {[["Container Cost ($)","Container Cost"],["Drayage ($)","Drayage"]].map(([l,k])=>(
+                <div key={k} style={{marginBottom:9}}><label style={lbl}>{l}</label><input type="number" value={r[k]||""} onChange={e=>set(k,e.target.value)} style={fld}/></div>
+              ))}
+            </div>
+          </div>
+          {/* PRODUCTS */}
+          <div style={{...sec,padding:0}}>
+            <div style={{padding:"12px 18px",borderBottom:`1px solid ${V.border}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div style={{fontSize:10,fontWeight:700,color:"#059669",textTransform:"uppercase",letterSpacing:".07em"}}>Products</div>
+              {totalPC>0&&<div style={{fontSize:13,fontWeight:700,color:"#059669"}}>Product Cost Total: ${Math.round(totalPC).toLocaleString()}</div>}
+            </div>
+            <div style={{padding:"0 18px"}}>
+              <div style={{display:"grid",gridTemplateColumns:"3fr 90px 70px 100px 100px 32px",gap:8,padding:"8px 0",fontSize:10,fontWeight:700,color:V.text2,textTransform:"uppercase",letterSpacing:".05em",borderBottom:`1px solid ${V.border}`}}>
+                <span>Product / SKU</span><span>Qty</span><span>Unit</span><span style={{textAlign:"right"}}>Cost/Unit</span><span style={{textAlign:"right"}}>Line Total</span><span/>
+              </div>
+              {r.SKUs.map((s,i)=>{
+                const cp=Number(itemSetup[s.sku]?.cost||0);
+                const lt=cp*num(s.qty);
+                return(<div key={i} style={{display:"grid",gridTemplateColumns:"3fr 90px 70px 100px 100px 32px",gap:8,padding:"8px 0",borderBottom:`1px solid ${V.border}`,alignItems:"center"}}>
+                  <SkuAutocompleteInput value={s.sku} onChange={e=>setSku(i,"sku",e.target.value)} options={skuCatalog} style={{...fld,fontSize:12}} placeholder="Product name"/>
+                  <input value={s.qty} onChange={e=>setSku(i,"qty",e.target.value)} style={{...fld,textAlign:"right"}} placeholder="0"/>
+                  <input value={s.unit} onChange={e=>setSku(i,"unit",e.target.value)} style={fld} placeholder="CTN"/>
+                  <div style={{fontSize:12,textAlign:"right",color:cp>0?V.text:V.text2,padding:"0 4px"}}>{cp>0?`$${cp.toFixed(2)}`:"—"}</div>
+                  <div style={{fontSize:12,fontWeight:700,textAlign:"right",color:lt>0?"#059669":V.text2,padding:"0 4px"}}>{lt>0?`$${Math.round(lt).toLocaleString()}`:"—"}</div>
+                  <button onClick={()=>setR(p=>({...p,SKUs:p.SKUs.filter((_,j)=>j!==i)}))} style={{fontSize:15,border:"none",background:"transparent",cursor:"pointer",color:"#94a3b8",padding:0}}>×</button>
+                </div>);
+              })}
+              <div style={{padding:"10px 0"}}><button onClick={()=>setR(p=>({...p,SKUs:[...p.SKUs,{sku:"",qty:"",unit:"CTN"}]}))} style={{fontSize:12,padding:"5px 12px",border:`1px solid ${V.border2}`,borderRadius:6,background:"transparent",cursor:"pointer",color:V.text2}}>+ Add Product</button></div>
+            </div>
+          </div>
+          {/* NOTES */}
+          <div style={sec}><label style={lbl}>Notes</label><textarea value={r["Note"]||""} onChange={e=>set("Note",e.target.value)} rows={3} style={{...fld,resize:"vertical",fontFamily:"inherit",lineHeight:1.6}}/></div>
+          {/* FOOTER */}
+          <div style={{display:"flex",gap:10,paddingTop:4}}>
+            <button onClick={handleSave} disabled={syncing} style={{fontSize:13,padding:"9px 28px",border:"none",borderRadius:8,background:"#b45309",color:"#fff",cursor:"pointer",fontWeight:700,boxShadow:"0 2px 10px rgba(180,87,9,.3)"}}>{syncing?"Saving…":"Save Shipment"}</button>
+            <button onClick={onClose} style={{fontSize:13,padding:"9px 18px",border:`1px solid ${V.border2}`,borderRadius:8,background:"transparent",cursor:"pointer",color:V.text,fontWeight:500}}>Cancel</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── LOCATION SETUP ───────────────────────────────────────
+function LocationSetup({locations,saveLocations,data}){
+  const V=THEME;
+  const allCustomers=useMemo(()=>[...new Set((data||[]).map(r=>r["Customer"]).filter(Boolean))].sort(),[data]);
+  const shipmentCounts=useMemo(()=>{
+    const m={};
+    (data||[]).forEach(r=>{const d=r["Landing Location"]||r["Destination"]||"";if(d)m[d]=(m[d]||0)+1;});
+    return m;
+  },[data]);
+
+  const BLANK={id:"",name:"",code:"",type:"Warehouse",address:"",city:"",state:"",contact:"",phone:"",email:"",notes:"",customers:[]};
+  const [selected,setSelected]=useState(null);
+  const [editing,setEditing]=useState(null);
+  const [isNew,setIsNew]=useState(false);
+  const [confirmDel,setConfirmDel]=useState(null);
+
+  const TYPE_COLORS={"Warehouse":"#1d4ed8","DC":"#7c3aed","Customer":"#047857","Port":"#b45309","Other":"#64748b"};
+  const TYPE_OPTS=["Warehouse","DC","Customer","Port","Other"];
+
+  function startNew(){
+    const draft={...BLANK,id:"loc_"+Date.now()};
+    setEditing(draft);setIsNew(true);setSelected(null);
+  }
+  function startEdit(loc){setEditing({...loc});setIsNew(false);setSelected(loc.id);}
+  function cancelEdit(){setEditing(null);setIsNew(false);}
+  function handleSave(){
+    if(!editing.name.trim())return;
+    const updated=isNew?[...locations,editing]:locations.map(l=>l.id===editing.id?editing:l);
+    saveLocations(updated);
+    setSelected(editing.id);setEditing(null);setIsNew(false);
+  }
+  function handleDelete(id){
+    saveLocations(locations.filter(l=>l.id!==id));
+    setSelected(null);setEditing(null);setConfirmDel(null);
+  }
+  function toggleCustomer(c){
+    setEditing(e=>{
+      const cs=e.customers||[];
+      return {...e,customers:cs.includes(c)?cs.filter(x=>x!==c):[...cs,c]};
     });
   }
-  const fld={width:"100%",fontSize:13,padding:"6px 8px",border:`0.5px solid ${V.border2}`,borderRadius:6,background:V.bg,color:V.text,boxSizing:"border-box"};
-  const lbl={fontSize:11,color:V.text2,marginBottom:3,display:"block"};
-  function handleSave(){const out={...r,"SKUs":r.SKUs};onSave(out);}
+  function set(k,v){setEditing(e=>({...e,[k]:v}));}
+
+  const card={background:V.bg2,border:`1px solid ${V.border}`,borderRadius:10,padding:"12px 14px",cursor:"pointer",transition:"border-color .15s",marginBottom:8};
+  const fld={background:V.bg3,border:`1px solid ${V.border2}`,borderRadius:7,padding:"7px 10px",color:V.text,fontSize:13,width:"100%",boxSizing:"border-box"};
+  const lbl={display:"block",fontSize:11,fontWeight:600,color:V.text2,marginBottom:4,textTransform:"uppercase",letterSpacing:.5};
+  const sec={marginBottom:16};
+
+  const displayLoc=selected?locations.find(l=>l.id===selected):null;
+
   return(
-    <div className="modal-overlay">
-      <div style={{background:V.bg,borderRadius:12,border:`0.5px solid ${V.border}`,padding:22,width:720,maxWidth:"95vw",maxHeight:"84vh",overflow:"auto"}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-          <span style={{fontSize:15,fontWeight:500}}>Edit: {r["LQC PO#"]}</span>
-          <button onClick={onClose} style={{fontSize:18,border:"none",background:"transparent",cursor:"pointer",color:V.text2}}>×</button>
+    <div style={{display:"grid",gridTemplateColumns:"280px 1fr",gap:20,height:"calc(100vh - 120px)",overflow:"hidden"}}>
+      {/* LEFT PANEL */}
+      <div style={{display:"flex",flexDirection:"column",gap:0,overflow:"hidden"}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+          <div style={{fontSize:15,fontWeight:700,color:V.text}}>Locations <span style={{fontSize:12,color:V.text2,fontWeight:400}}>({locations.length})</span></div>
+          <button onClick={startNew} style={{fontSize:12,padding:"6px 14px",border:"none",borderRadius:7,background:"#b45309",color:"#fff",cursor:"pointer",fontWeight:600}}>+ New</button>
         </div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:12}}>
-          {[["Customer","Customer"],["Customer PO","Customer PO"],["ETD","ETD","date"],["ETA","ETA","date"],["MABD","MABD","date"],["POD","POD"],["Destination","Destination"],["Agent","Agent"],["Container #","Container #"],["BOL #","BOL #"],["O/F","O/F"],["Invoice #","Invoice #"],["Container Cost ($)","Container Cost"],["Drayage ($)","Drayage"],["Note","Note"]].map(([l,k,t])=>(
-            <div key={k}><label style={lbl}>{l}</label><input type={t||"text"} value={r[k]||""} onChange={e=>set(k,e.target.value)} style={fld}/></div>
-          ))}
-          <div><label style={lbl}>Status</label><select value={r["Status"]} onChange={e=>set("Status",e.target.value)} style={fld}>{STATUSES.map(s=><option key={s}>{s}</option>)}</select></div>
-          <div><label style={lbl}>Shipping model</label><select value={r["Shipping Model"]} onChange={e=>set("Shipping Model",e.target.value)} style={fld}>{["Direct to Client","US Warehouse","Port Pickup"].map(m=><option key={m}>{m}</option>)}</select></div>
-          <div style={{gridColumn:"1 / -1"}}><label style={lbl}>Landing Location <span style={{fontSize:10,color:"#0e7490",fontWeight:600,background:"rgba(14,116,144,.1)",borderRadius:3,padding:"1px 5px",marginLeft:4}}>WH</span></label>
-            <select value={r["Landing Location"]||""} onChange={e=>set("Landing Location",e.target.value)} style={fld}>
-              <option value="">Select warehouse / destination…</option>
-              {WAREHOUSE_LOCATIONS.map(l=><option key={l}>{l}</option>)}
-            </select>
+        <div style={{overflowY:"auto",flex:1,paddingRight:2}}>
+          {locations.length===0&&<div style={{color:V.text2,fontSize:13,textAlign:"center",paddingTop:40}}>No locations yet.<br/>Click + New to add one.</div>}
+          {locations.map(loc=>{
+            const isActive=selected===loc.id&&!editing;
+            const sc=shipmentCounts[loc.name]||0;
+            const tc=TYPE_COLORS[loc.type]||"#64748b";
+            return(
+              <div key={loc.id} onClick={()=>{if(!editing){startEdit(loc);}}} style={{...card,borderColor:isActive?"#b45309":V.border,boxShadow:isActive?"0 0 0 2px rgba(180,83,9,.25)":"none"}}>
+                <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:8}}>
+                  <div style={{minWidth:0}}>
+                    <div style={{fontSize:13,fontWeight:700,color:V.text,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{loc.name}</div>
+                    <div style={{fontSize:11,color:V.text2,marginTop:1}}>{loc.code||"—"}</div>
+                  </div>
+                  <span style={{fontSize:10,fontWeight:700,padding:"2px 7px",borderRadius:4,background:`${tc}22`,color:tc,whiteSpace:"nowrap",flexShrink:0}}>{loc.type}</span>
+                </div>
+                <div style={{display:"flex",gap:12,marginTop:8,fontSize:11,color:V.text2}}>
+                  {(loc.city||loc.state)&&<span>📍 {[loc.city,loc.state].filter(Boolean).join(", ")}</span>}
+                  {sc>0&&<span style={{color:"#b45309",fontWeight:600}}>{sc} shipment{sc!==1?"s":""}</span>}
+                </div>
+                {loc.customers&&loc.customers.length>0&&(
+                  <div style={{marginTop:6,display:"flex",flexWrap:"wrap",gap:4}}>
+                    {loc.customers.slice(0,3).map(c=>(
+                      <span key={c} style={{fontSize:10,padding:"1px 6px",borderRadius:10,background:"#0f172a",color:"#94a3b8",border:"1px solid #334155"}}>{c}</span>
+                    ))}
+                    {loc.customers.length>3&&<span style={{fontSize:10,color:V.text2}}>+{loc.customers.length-3}</span>}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* RIGHT PANEL */}
+      <div style={{overflowY:"auto",background:V.bg2,border:`1px solid ${V.border}`,borderRadius:12,padding:24}}>
+        {!editing&&!displayLoc&&(
+          <div style={{textAlign:"center",paddingTop:60,color:V.text2}}>
+            <div style={{fontSize:40,marginBottom:12}}>🏭</div>
+            <div style={{fontSize:15,fontWeight:600,color:V.text,marginBottom:6}}>Location Manager</div>
+            <div style={{fontSize:13}}>Select a location to edit, or click + New to create one.</div>
           </div>
-        </div>
-        <div style={{background:V.bg3,border:`0.5px solid ${V.border}`,borderRadius:8,padding:"12px 14px",marginBottom:12}}>
-          <div style={{fontSize:11,fontWeight:600,color:V.text2,textTransform:"uppercase",letterSpacing:".05em",marginBottom:10}}>Container & Volume</div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12}}>
-            <div><label style={lbl}># of Containers</label><input type="number" min="1" value={r["Container Qty"]||""} onChange={e=>setContainer("Container Qty",e.target.value)} style={fld}/></div>
-            <div><label style={lbl}>Container Size</label>
-              <select value={r["Container Size"]||""} onChange={e=>setContainer("Container Size",e.target.value)} style={fld}>
-                <option value="">Select size…</option>
-                {["20ft","40ft","40ft HC","45ft HC"].map(s=><option key={s}>{s}</option>)}
-              </select>
+        )}
+
+        {/* VIEW MODE — show details when a location is selected but not in edit mode */}
+        {!editing&&displayLoc&&(
+          <div>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:20}}>
+              <div>
+                <div style={{fontSize:20,fontWeight:800,color:V.text}}>{displayLoc.name}</div>
+                <div style={{fontSize:12,color:V.text2,marginTop:2}}>{displayLoc.code}{displayLoc.city||displayLoc.state?" · "+[displayLoc.city,displayLoc.state].filter(Boolean).join(", "):""}</div>
+              </div>
+              <div style={{display:"flex",gap:8}}>
+                <button onClick={()=>startEdit(displayLoc)} style={{fontSize:12,padding:"7px 16px",border:`1px solid ${V.border2}`,borderRadius:7,background:V.bg3,color:V.text,cursor:"pointer",fontWeight:600}}>✎ Edit</button>
+                <button onClick={()=>setConfirmDel(displayLoc.id)} style={{fontSize:12,padding:"7px 14px",border:"1px solid #dc2626",borderRadius:7,background:"transparent",color:"#dc2626",cursor:"pointer",fontWeight:600}}>Delete</button>
+              </div>
             </div>
-            <div><label style={lbl}>Volume (CBM)</label><input type="number" value={r["Volume"]||""} onChange={e=>set("Volume",e.target.value)} placeholder="Auto-calculated" style={fld}/></div>
+            {confirmDel===displayLoc.id&&(
+              <div style={{background:"#450a0a22",border:"1px solid #dc2626",borderRadius:8,padding:"12px 16px",marginBottom:16,display:"flex",alignItems:"center",gap:12}}>
+                <span style={{fontSize:13,color:V.text}}>Delete <strong>{displayLoc.name}</strong>? This cannot be undone.</span>
+                <button onClick={()=>handleDelete(displayLoc.id)} style={{fontSize:12,padding:"5px 14px",border:"none",borderRadius:6,background:"#dc2626",color:"#fff",cursor:"pointer",fontWeight:700}}>Confirm Delete</button>
+                <button onClick={()=>setConfirmDel(null)} style={{fontSize:12,padding:"5px 10px",border:`1px solid ${V.border2}`,borderRadius:6,background:"transparent",color:V.text2,cursor:"pointer"}}>Cancel</button>
+              </div>
+            )}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:20}}>
+              {[["Type",displayLoc.type],["Code",displayLoc.code||"—"],["Address",displayLoc.address||"—"],["City / State",[displayLoc.city,displayLoc.state].filter(Boolean).join(", ")||"—"],["Contact",displayLoc.contact||"—"],["Phone",displayLoc.phone||"—"],["Email",displayLoc.email||"—"]].map(([k,v])=>(
+                <div key={k}><div style={{fontSize:11,color:V.text2,fontWeight:600,marginBottom:2,textTransform:"uppercase",letterSpacing:.5}}>{k}</div><div style={{fontSize:13,color:V.text}}>{v}</div></div>
+              ))}
+            </div>
+            {displayLoc.notes&&<div style={{marginBottom:20}}><div style={{fontSize:11,color:V.text2,fontWeight:600,marginBottom:4,textTransform:"uppercase",letterSpacing:.5}}>Notes</div><div style={{fontSize:13,color:V.text,lineHeight:1.6}}>{displayLoc.notes}</div></div>}
+            <div>
+              <div style={{fontSize:11,color:V.text2,fontWeight:600,marginBottom:8,textTransform:"uppercase",letterSpacing:.5}}>Linked Customers ({(displayLoc.customers||[]).length})</div>
+              {(displayLoc.customers||[]).length===0
+                ?<div style={{fontSize:13,color:V.text2}}>No customers linked.</div>
+                :<div style={{display:"flex",flexWrap:"wrap",gap:6}}>{displayLoc.customers.map(c=><span key={c} style={{fontSize:12,padding:"4px 10px",borderRadius:12,background:"#1e293b",color:"#94a3b8",border:"1px solid #334155"}}>{c}</span>)}</div>
+              }
+            </div>
           </div>
-        </div>
-        <div style={{marginBottom:12}}>
-          <div style={{fontSize:12,fontWeight:500,marginBottom:8}}>SKUs</div>
-          {r.SKUs.map((s,i)=>(
-            <div key={i} style={{display:"grid",gridTemplateColumns:"1fr 80px 80px",gap:8,marginBottom:6}}>
-              <SkuAutocompleteInput value={s.sku} onChange={e=>setSku(i,"sku",e.target.value)} options={skuCatalog} style={fld}/>
-              <input value={s.qty} onChange={e=>setSku(i,"qty",e.target.value)} style={fld}/>
-              <input value={s.unit} onChange={e=>setSku(i,"unit",e.target.value)} style={fld}/>
+        )}
+
+        {/* EDIT / NEW MODE */}
+        {editing&&(
+          <div>
+            <div style={{fontSize:16,fontWeight:700,color:V.text,marginBottom:20}}>{isNew?"New Location":"Edit Location"}</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
+              <div style={sec}>
+                <label style={lbl}>Location Name *</label>
+                <input value={editing.name} onChange={e=>set("name",e.target.value)} style={fld} placeholder="e.g. Unitrans - PA"/>
+              </div>
+              <div style={sec}>
+                <label style={lbl}>Code / Abbreviation</label>
+                <input value={editing.code} onChange={e=>set("code",e.target.value)} style={fld} placeholder="e.g. UT-PA"/>
+              </div>
+              <div style={sec}>
+                <label style={lbl}>Type</label>
+                <select value={editing.type} onChange={e=>set("type",e.target.value)} style={fld}>
+                  {TYPE_OPTS.map(t=><option key={t}>{t}</option>)}
+                </select>
+              </div>
+              <div style={sec}>
+                <label style={lbl}>Address</label>
+                <input value={editing.address} onChange={e=>set("address",e.target.value)} style={fld} placeholder="Street address"/>
+              </div>
+              <div style={sec}>
+                <label style={lbl}>City</label>
+                <input value={editing.city} onChange={e=>set("city",e.target.value)} style={fld} placeholder="City"/>
+              </div>
+              <div style={sec}>
+                <label style={lbl}>State</label>
+                <input value={editing.state} onChange={e=>set("state",e.target.value)} style={fld} placeholder="e.g. PA"/>
+              </div>
+              <div style={sec}>
+                <label style={lbl}>Contact Name</label>
+                <input value={editing.contact} onChange={e=>set("contact",e.target.value)} style={fld} placeholder="Point of contact"/>
+              </div>
+              <div style={sec}>
+                <label style={lbl}>Phone</label>
+                <input value={editing.phone} onChange={e=>set("phone",e.target.value)} style={fld} placeholder="Phone number"/>
+              </div>
+              <div style={{...sec,gridColumn:"1/-1"}}>
+                <label style={lbl}>Email</label>
+                <input value={editing.email} onChange={e=>set("email",e.target.value)} style={fld} placeholder="contact@example.com"/>
+              </div>
+              <div style={{...sec,gridColumn:"1/-1"}}>
+                <label style={lbl}>Notes</label>
+                <textarea value={editing.notes} onChange={e=>set("notes",e.target.value)} rows={3} style={{...fld,resize:"vertical",fontFamily:"inherit",lineHeight:1.6}} placeholder="Any additional details…"/>
+              </div>
             </div>
-          ))}
-          <button onClick={()=>setR(p=>({...p,SKUs:[...p.SKUs,{sku:"",qty:"",unit:"CTN"}]}))} style={{fontSize:12,padding:"4px 10px",border:`0.5px solid ${V.border2}`,borderRadius:6,background:"transparent",cursor:"pointer",color:V.text}}>+ Add SKU</button>
-        </div>
-        <div style={{display:"flex",gap:8}}>
-          <button onClick={handleSave} disabled={syncing} style={{fontSize:13,padding:"7px 20px",border:"none",borderRadius:8,background:"#b45309",color:"#fff",cursor:"pointer",fontWeight:500}}>{syncing?"Saving…":"Save changes"}</button>
-          <button onClick={onClose} style={{fontSize:13,padding:"7px 16px",border:`0.5px solid ${V.border2}`,borderRadius:8,background:"transparent",cursor:"pointer",color:V.text}}>Cancel</button>
-        </div>
+
+            {/* CUSTOMER ASSOCIATIONS */}
+            <div style={{borderTop:`1px solid ${V.border}`,paddingTop:16,marginTop:4}}>
+              <div style={{fontSize:12,fontWeight:700,color:V.text,marginBottom:4,textTransform:"uppercase",letterSpacing:.5}}>Linked Customers</div>
+              <div style={{fontSize:12,color:V.text2,marginBottom:10}}>Toggle the customers whose freight ships to this location.</div>
+              {allCustomers.length===0
+                ?<div style={{fontSize:13,color:V.text2}}>No customer data yet.</div>
+                :<div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                  {allCustomers.map(c=>{
+                    const on=(editing.customers||[]).includes(c);
+                    return(
+                      <button key={c} onClick={()=>toggleCustomer(c)} style={{fontSize:12,padding:"5px 12px",borderRadius:12,border:on?"1px solid #b45309":"1px solid #334155",background:on?"#431407":"#1e293b",color:on?"#fb923c":"#94a3b8",cursor:"pointer",fontWeight:on?700:400,transition:"all .15s"}}>
+                        {on?"✓ ":""}{c}
+                      </button>
+                    );
+                  })}
+                </div>
+              }
+            </div>
+
+            <div style={{display:"flex",gap:10,marginTop:20}}>
+              <button onClick={handleSave} disabled={!editing.name.trim()} style={{fontSize:13,padding:"9px 28px",border:"none",borderRadius:8,background:editing.name.trim()?"#b45309":"#64748b",color:"#fff",cursor:editing.name.trim()?"pointer":"not-allowed",fontWeight:700,boxShadow:editing.name.trim()?"0 2px 10px rgba(180,83,9,.3)":"none"}}>
+                {isNew?"Create Location":"Save Changes"}
+              </button>
+              <button onClick={cancelEdit} style={{fontSize:13,padding:"9px 18px",border:`1px solid ${V.border2}`,borderRadius:8,background:"transparent",cursor:"pointer",color:V.text,fontWeight:500}}>Cancel</button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
