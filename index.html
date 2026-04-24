@@ -1583,9 +1583,35 @@ function ItemSetup({skuCatalog,itemSetup,saveItemSetup,syncing}){
 
 
 // ─── MANAGE ───────────────────────────────────────────────
+const CHART_COLORS=["#0d9488","#6366f1","#f97316","#10b981","#8b5cf6","#f59e0b","#0ea5e9","#ec4899","#14b8a6","#a855f7"];
+
+function DonutChart({slices,size=200}){
+  const total=slices.reduce((s,sl)=>s+sl.value,0);
+  if(!total)return<div style={{width:size,height:size,display:"flex",alignItems:"center",justifyContent:"center",color:V.text2,fontSize:12}}>No data</div>;
+  const R=size/2-4,r=R*0.58,cx=size/2,cy=size/2;
+  let angle=-Math.PI/2;
+  const paths=slices.map((sl,i)=>{
+    const sa=angle,ea=angle+(sl.value/total)*2*Math.PI;
+    const large=ea-sa>Math.PI?1:0;
+    const d=`M${cx+R*Math.cos(sa)} ${cy+R*Math.sin(sa)} A${R} ${R} 0 ${large} 1 ${cx+R*Math.cos(ea)} ${cy+R*Math.sin(ea)} L${cx+r*Math.cos(ea)} ${cy+r*Math.sin(ea)} A${r} ${r} 0 ${large} 0 ${cx+r*Math.cos(sa)} ${cy+r*Math.sin(sa)} Z`;
+    angle=ea;
+    return{...sl,d,pct:Math.round(sl.value/total*100)};
+  });
+  return(
+    <svg width={size} height={size}>
+      {paths.map((p,i)=><path key={i} d={p.d} fill={p.color} stroke="#fff" strokeWidth="2.5"/>)}
+      <text x={cx} y={cy-8} textAnchor="middle" dominantBaseline="middle" style={{fontSize:22,fontWeight:700,fill:V.text}}>{total}</text>
+      <text x={cx} y={cy+12} textAnchor="middle" dominantBaseline="middle" style={{fontSize:10,fill:V.text2}}>containers</text>
+    </svg>
+  );
+}
+
 function Manage({data,saveRow,deleteRow,syncing,skuCatalog,locations}){
   const [mode,setMode]=useState("list");
   const [newRow,setNewRow]=useState(null);
+  const [filterLoc,setFilterLoc]=useState(null);
+  const num=v=>{const n=Number(String(v??"").replace(/[^0-9.-]/g,""));return Number.isFinite(n)?n:0;};
+
   const blank=()=>({
     "LQC PO#":"","Customer":"","Customer PO":"","SKUs":[{sku:"",qty:"",unit:"CTN"}],
     "Volume":"","Container Qty":"","Container Size":"","Landing Location":"",
@@ -1594,33 +1620,157 @@ function Manage({data,saveRow,deleteRow,syncing,skuCatalog,locations}){
     "Container Cost":"","Drayage":"",
     "Status":"PO Placed","Shipping Model":"US Warehouse"
   });
-  async function handleSave(){if(!newRow["LQC PO#"])return;await saveRow(newRow);setMode("list");setNewRow(null);}
+
+  async function handleSave(){
+    if(!newRow||!newRow["LQC PO#"])return;
+    await saveRow(newRow);
+    setMode("list");setNewRow(null);
+  }
+
+  const locData=useMemo(()=>{
+    const map={};
+    (data||[]).forEach(r=>{
+      const loc=r["Landing Location"]||r["Destination"]||r["POD"]||"Unknown";
+      const ctrs=num(r["Container Qty"])||1;
+      if(!map[loc])map[loc]={containers:0,shipments:0,active:0,rows:[]};
+      map[loc].containers+=ctrs;
+      map[loc].shipments++;
+      if(r["Status"]!=="Delivered")map[loc].active++;
+      map[loc].rows.push(r);
+    });
+    return Object.entries(map).map(([name,v],i)=>({name,...v,color:CHART_COLORS[i%CHART_COLORS.length]})).sort((a,b)=>b.containers-a.containers);
+  },[data]);
+
+  const totalCtrs=locData.reduce((s,l)=>s+l.containers,0);
+  const slices=locData.slice(0,10).map(l=>({...l,value:l.containers}));
+  const active=(data||[]).filter(r=>r["Status"]!=="Delivered");
+  const drillRows=filterLoc?locData.find(l=>l.name===filterLoc)?.rows||[]:[];
+
   if(mode==="new"&&newRow)return(
     <div style={{padding:24}}>
       <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:18}}>
-        <button onClick={()=>{setMode("list");setNewRow(null);}} style={{fontSize:12,padding:"5px 12px",border:`0.5px solid ${V.border2}`,borderRadius:6,background:"transparent",cursor:"pointer",color:V.text}}>← Back</button>
-        <span style={{fontSize:16,fontWeight:500}}>New shipment</span>
+        <button onClick={()=>{setMode("list");setNewRow(null);}} style={{fontSize:12,padding:"6px 14px",border:`1px solid ${V.border}`,borderRadius:8,background:V.bg2,cursor:"pointer",color:V.text,fontWeight:500}}>← Back</button>
+        <span style={{fontSize:18,fontWeight:700,color:V.text}}>New Shipment</span>
       </div>
       <ShipmentForm row={newRow} setRow={setNewRow} onSave={handleSave} onCancel={()=>{setMode("list");setNewRow(null);}} syncing={syncing} skuCatalog={skuCatalog} locations={locations}/>
     </div>
   );
+
   return(
     <div style={{padding:24}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
-        <h2 style={{fontSize:18,fontWeight:500,margin:0}}>Order management</h2>
-        <button onClick={()=>{setNewRow(blank());setMode("new");}} style={{fontSize:13,padding:"7px 16px",border:"none",borderRadius:8,background:"#0d9488",color:"#fff",cursor:"pointer",fontWeight:500}}>+ New shipment</button>
+      {/* HEADER */}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20}}>
+        <div>
+          <div style={{fontSize:9,fontWeight:700,color:V.text2,textTransform:"uppercase",letterSpacing:".1em",marginBottom:5}}>Configuration</div>
+          <div style={{fontSize:26,fontWeight:800,color:V.text,letterSpacing:"-0.03em",lineHeight:1}}>Order Management</div>
+          <div style={{fontSize:12,color:V.text2,marginTop:6}}>{(data||[]).length} total shipments · {active.length} active · {(data||[]).length-active.length} delivered</div>
+        </div>
+        <button onClick={()=>{setNewRow(blank());setMode("new");}} style={{fontSize:13,padding:"9px 20px",border:"none",borderRadius:9,background:"#0d9488",color:"#fff",cursor:"pointer",fontWeight:600,boxShadow:"0 2px 10px rgba(13,148,136,.25)",flexShrink:0}}>+ New Shipment</button>
       </div>
-      <div style={{background:V.bg,border:`0.5px solid ${V.border}`,borderRadius:12,padding:14,marginBottom:14,fontSize:13,color:V.text2}}>
-        New shipments are saved directly to your Google Sheet. Use the <strong>Shipments</strong> tab to edit or update statuses on existing orders.
-      </div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12}}>
-        {["RJW PA P01","Unitrans MA","RJW TX D01"].map(w=>(
-          <div key={w} style={{background:V.bg,border:`0.5px solid ${V.border}`,borderRadius:12,padding:16}}>
-            <div style={{fontSize:12,fontWeight:500,marginBottom:4}}>🏬 {w}</div>
-            <div style={{fontSize:12,color:V.text2}}>{data.filter(r=>r["Destination"]&&r["Destination"].toLowerCase().includes(w.toLowerCase().split(" ")[0])).length} shipments</div>
+
+      {/* CHART + CARDS */}
+      <div style={{background:V.bg,border:`1px solid ${V.border}`,borderRadius:14,padding:20,marginBottom:16,boxShadow:"0 1px 3px rgba(0,0,0,0.06)"}}>
+        <div style={{fontSize:13,fontWeight:700,color:V.text,marginBottom:4}}>Container Distribution by Location</div>
+        <div style={{fontSize:11,color:V.text2,marginBottom:18}}>Click a location to drill into its shipments</div>
+        {locData.length===0
+          ?<div style={{textAlign:"center",padding:"40px 0",color:V.text2,fontSize:13}}>No shipment data yet. Add shipments to see distribution.</div>
+          :<div style={{display:"flex",gap:32,alignItems:"flex-start",flexWrap:"wrap"}}>
+            {/* DONUT */}
+            <div style={{flexShrink:0,display:"flex",flexDirection:"column",alignItems:"center",gap:8}}>
+              <DonutChart slices={slices} size={180}/>
+              <div style={{fontSize:11,color:V.text2}}>{locData.length} location{locData.length!==1?"s":""} · {totalCtrs} total containers</div>
+            </div>
+            {/* LEGEND + MINI BARS */}
+            <div style={{flex:1,minWidth:260,display:"flex",flexDirection:"column",gap:6,justifyContent:"center"}}>
+              {locData.slice(0,10).map((l,i)=>{
+                const pct=totalCtrs>0?Math.round(l.containers/totalCtrs*100):0;
+                const isActive=filterLoc===l.name;
+                return(
+                  <div key={l.name} onClick={()=>setFilterLoc(isActive?null:l.name)}
+                    className="kpi-card"
+                    style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",borderRadius:8,border:`1px solid ${isActive?l.color+"60":V.border}`,background:isActive?`${l.color}0a`:"#fff",cursor:"pointer",transition:"all .15s"}}>
+                    <div style={{width:10,height:10,borderRadius:3,background:l.color,flexShrink:0}}/>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3}}>
+                        <span style={{fontSize:12,fontWeight:isActive?700:500,color:isActive?l.color:V.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:200}}>{l.name}</span>
+                        <span style={{fontSize:11,fontWeight:700,color:l.color,flexShrink:0,marginLeft:8}}>{pct}%</span>
+                      </div>
+                      <div style={{height:4,background:V.bg3,borderRadius:99,overflow:"hidden"}}>
+                        <div style={{height:"100%",width:`${pct}%`,background:l.color,borderRadius:99,transition:"width .3s"}}/>
+                      </div>
+                    </div>
+                    <div style={{textAlign:"right",flexShrink:0}}>
+                      <div style={{fontSize:12,fontWeight:700,color:V.text}}>{l.containers}</div>
+                      <div style={{fontSize:10,color:V.text2}}>ctrs</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
+        }
+      </div>
+
+      {/* LOCATION CARDS GRID */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:12,marginBottom:16}}>
+        {locData.map((l,i)=>{
+          const isActive=filterLoc===l.name;
+          return(
+            <div key={l.name} onClick={()=>setFilterLoc(isActive?null:l.name)} className="kpi-card"
+              style={{background:"#fff",border:`1px solid ${isActive?l.color+"60":V.border}`,borderTop:`3px solid ${isActive?l.color:V.border}`,borderRadius:12,padding:"16px 18px",cursor:"pointer",
+                boxShadow:isActive?`0 0 0 2px ${l.color}25,0 4px 16px rgba(0,0,0,0.08)`:"0 1px 3px rgba(0,0,0,0.06)"}}>
+              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+                <div style={{width:8,height:8,borderRadius:2,background:l.color,flexShrink:0}}/>
+                <div style={{fontSize:11,fontWeight:700,color:V.text2,textTransform:"uppercase",letterSpacing:".05em",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{INTERNAL_LOCS.has(l.name)?"Warehouse":"Location"}</div>
+              </div>
+              <div style={{fontSize:13,fontWeight:700,color:V.text,marginBottom:10,lineHeight:1.3,minHeight:32}}>{l.name}</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                <div><div style={{fontSize:18,fontWeight:800,color:l.color,lineHeight:1}}>{l.shipments}</div><div style={{fontSize:10,color:V.text2,marginTop:1}}>shipments</div></div>
+                <div><div style={{fontSize:18,fontWeight:800,color:l.color,lineHeight:1}}>{l.containers}</div><div style={{fontSize:10,color:V.text2,marginTop:1}}>containers</div></div>
+              </div>
+              {l.active>0&&<div style={{marginTop:8,fontSize:10,fontWeight:600,color:"#0d9488",background:"rgba(13,148,136,0.08)",borderRadius:4,padding:"2px 6px",display:"inline-block"}}>{l.active} active</div>}
+            </div>
+          );
+        })}
+        {locData.length===0&&[1,2,3].map(i=>(
+          <div key={i} style={{background:V.bg2,border:`1px solid ${V.border}`,borderRadius:12,padding:"16px 18px",height:130}}/>
         ))}
       </div>
+
+      {/* DRILL-DOWN TABLE */}
+      {filterLoc&&(
+        <div style={{background:V.bg,border:`1px solid ${V.border}`,borderRadius:14,overflow:"hidden",marginBottom:16,boxShadow:"0 1px 3px rgba(0,0,0,0.06)"}}>
+          <div style={{padding:"12px 16px",background:V.bg2,borderBottom:`1px solid ${V.border}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div>
+              <div style={{fontSize:13,fontWeight:700,color:V.text}}>{filterLoc}</div>
+              <div style={{fontSize:11,color:V.text2,marginTop:2}}>{drillRows.length} shipment{drillRows.length!==1?"s":""}</div>
+            </div>
+            <button onClick={()=>setFilterLoc(null)} style={{fontSize:12,padding:"4px 12px",border:`1px solid ${V.border}`,borderRadius:6,background:"transparent",cursor:"pointer",color:V.text2}}>✕ Close</button>
+          </div>
+          <div style={{overflowX:"auto"}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+              <thead><tr style={{background:V.bg3,fontSize:10,color:V.text2,textTransform:"uppercase",letterSpacing:".04em"}}>
+                {["LQC PO#","Customer","Status","ETD","ETA","Containers","Agent"].map(h=><th key={h} style={{padding:"8px 12px",textAlign:"left",borderBottom:`1px solid ${V.border}`,fontWeight:600,whiteSpace:"nowrap"}}>{h}</th>)}
+              </tr></thead>
+              <tbody>
+                {drillRows.map((r,i)=>(
+                  <tr key={r["LQC PO#"]||i} className="tbl-row" style={{borderBottom:`0.5px solid ${V.border}`,background:i%2===0?V.bg:"rgba(0,0,0,.012)"}}>
+                    <td style={{padding:"8px 12px",fontWeight:600,color:"#0d9488"}}>{r["LQC PO#"]||"—"}</td>
+                    <td style={{padding:"8px 12px",color:V.text}}>{r["Customer"]||"—"}</td>
+                    <td style={{padding:"8px 12px"}}><span style={{fontSize:10,fontWeight:700,padding:"2px 7px",borderRadius:4,background:`${STATUS_COLORS[r["Status"]]||"#64748b"}18`,color:STATUS_COLORS[r["Status"]]||"#64748b"}}>{r["Status"]||"—"}</span></td>
+                    <td style={{padding:"8px 12px",color:V.text2}}>{fmtDate(r["ETD"])}</td>
+                    <td style={{padding:"8px 12px",color:V.text2}}>{fmtDate(r["ETA"])}</td>
+                    <td style={{padding:"8px 12px",color:V.text2}}>{r["Container Qty"]||"—"}{r["Container Size"]&&<span style={{marginLeft:4,fontSize:10,color:V.text2}}>× {r["Container Size"]}</span>}</td>
+                    <td style={{padding:"8px 12px",color:V.text2}}>{r["Agent"]||"—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      <div style={{fontSize:12,color:V.text2,padding:"10px 0"}}>New shipments save directly to Google Sheet. Use the <strong style={{color:V.text}}>Shipments</strong> tab to edit existing orders.</div>
     </div>
   );
 }
