@@ -1709,7 +1709,6 @@ function EditModal({row,onSave,onClose,syncing,skuCatalog,itemSetup,locations}){
 
 // ─── LOCATION SETUP ───────────────────────────────────────
 function LocationSetup({locations,saveLocations,data}){
-  const V=THEME;
   const allCustomers=useMemo(()=>[...new Set((data||[]).map(r=>r["Customer"]).filter(Boolean))].sort(),[data]);
   const shipmentCounts=useMemo(()=>{
     const m={};
