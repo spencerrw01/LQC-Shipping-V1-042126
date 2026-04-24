@@ -34,6 +34,8 @@ const STATUSES = ["PO Placed","In Production","Ready to Ship","In Transit","Arri
 const STATUS_COLORS = {"PO Placed":"#6b7280","In Production":"#b45309","Ready to Ship":"#0284c7","In Transit":"#7c3aed","Arrived":"#065f46","Delivered":"#374151"};
 const MODEL_COLORS = {"Direct to Client":"#b45309","US Warehouse":"#0e7490","Port Pickup":"#7c3aed"};
 const LANE_DAYS = {east:55,west:30,gulf:40,default:45};
+const WAREHOUSE_LOCATIONS=["Unitrans - PA","Unitrans - MA","RJW - TX","RJW - PA","Direct to Client","Other"];
+const INTERNAL_LOCS=new Set(["Unitrans - PA","Unitrans - MA","RJW - TX","RJW - PA","Unitrans","RJW"]);
 const WARN_DAYS = 3;
 const TABS = ["Dashboard","Shipments","SKU Search","Timeline","Calendar","Alerts","Analytics","Item Setup","Manage"];
 
@@ -278,9 +280,9 @@ function App(){
       <div style={{flex:1,overflow:"auto"}} onClick={()=>bellOpen&&setBellOpen(false)}>
         {loading&&data.length===0&&<LoadingScreen/>}
         {(!loading||data.length>0)&&<>
-          {tab==="Dashboard"&&<Dashboard data={data} alerts={alerts} setTab={setTab}/>}
+          {tab==="Dashboard"&&<Dashboard data={data} alerts={alerts} setTab={setTab} itemSetup={itemSetup}/>}
           {tab==="Shipments"&&<Shipments data={data} alerts={alerts} quickStatus={quickStatus} setEditRow={setEditRow} selected={selected} toggleSelect={toggleSelect} toggleAll={toggleAll} bulkStatus={bulkStatus} setBulkStatus={setBulkStatus} applyBulk={applyBulk} syncing={syncing} itemSetup={itemSetup}/>}
-          {tab==="SKU Search"&&<SKUSearch data={data} alerts={alerts}/>}
+          {tab==="SKU Search"&&<SKUSearch data={data} alerts={alerts} itemSetup={itemSetup}/>}
           {tab==="Timeline"&&<Timeline data={data} alerts={alerts}/>}
           {tab==="Calendar"&&<Calendar data={data} calMonth={calMonth} setCalMonth={setCalMonth} alerts={alerts}/>}
           {tab==="Alerts"&&<AlertsTab alerts={alerts.filter(a=>alertTypeFilter==="All"||a.type===alertTypeFilter)} allAlerts={alerts} typeFilter={alertTypeFilter} setTypeFilter={setAlertTypeFilter} dismiss={dismiss} dismissAll={dismissAll} dismissed={dismissed} saveDismissed={saveDismissed}/>}
@@ -306,66 +308,195 @@ function LoadingScreen(){
 }
 
 // ─── DASHBOARD ────────────────────────────────────────────
-function Dashboard({data,alerts,setTab}){
-  const inTransit=data.filter(r=>r["Status"]==="In Transit").length;
-  const arriving7=data.filter(r=>{const d=parseDate(r["ETA"]);return d&&daysDiff(d)>=0&&daysDiff(d)<=7;}).length;
+function Dashboard({data,alerts,setTab,itemSetup}){
+  itemSetup=itemSetup||{};
+  const [drill,setDrill]=useState(null);
+  const num=v=>{const n=Number(String(v??"").replace(/[^0-9.-]/g,""));return Number.isFinite(n)?n:0;};
+  const active=useMemo(()=>data.filter(r=>r["Status"]!=="Delivered"),[data]);
+  const inTransit=useMemo(()=>data.filter(r=>r["Status"]==="In Transit"),[data]);
+  const arriving7=useMemo(()=>data.filter(r=>{const d=parseDate(r["ETA"]);return d&&daysDiff(d)>=0&&daysDiff(d)<=7;}),[data]);
   const crit=alerts.filter(a=>a.severity==="critical").length;
-  const byModel={"Direct to Client":0,"US Warehouse":0,"Port Pickup":0};
-  data.forEach(r=>{if(byModel[r["Shipping Model"]]!==undefined)byModel[r["Shipping Model"]]++;});
-  const upcoming=data.filter(r=>{const d=parseDate(r["ETA"]);return d&&daysDiff(d)>=0&&daysDiff(d)<=14;}).sort((a,b)=>new Date(a["ETA"])-new Date(b["ETA"])).slice(0,9);
   const alertPoSet=new Set(alerts.map(a=>a.po));
+  const fin=useMemo(()=>{
+    let pc=0,cc=0,dr=0;
+    active.forEach(r=>{
+      cc+=num(r["Container Cost"]);dr+=num(r["Drayage"]);
+      (Array.isArray(r["SKUs"])?r["SKUs"]:[]).forEach(s=>{pc+=num(s.qty)*Number(itemSetup[s.sku]?.cost||0);});
+    });
+    return{productCost:pc,containerCost:cc,drayage:dr,total:pc+cc+dr};
+  },[active,itemSetup]);
+  const fmt$=v=>v>=1000000?`$${(v/1000000).toFixed(1)}M`:v>=1000?`$${(v/1000).toFixed(0)}k`:`$${Math.round(v).toLocaleString()}`;
+  const upcoming=useMemo(()=>data.filter(r=>{const d=parseDate(r["ETA"]);return d&&daysDiff(d)>=0&&daysDiff(d)<=21;}).sort((a,b)=>new Date(a["ETA"])-new Date(b["ETA"])).slice(0,15),[data]);
+  const cards=[
+    {key:"active",label:"Active Orders",value:active.length,sub:`${data.filter(r=>r["Status"]==="Delivered").length} delivered`,color:"#b45309"},
+    {key:"transit",label:"In Transit",value:inTransit.length,sub:"On the water now",color:"#7c3aed"},
+    {key:"arriving",label:"Arriving ≤ 7 Days",value:arriving7.length,sub:"ETA this week",color:"#0e7490"},
+    {key:"alerts",label:"Active Alerts",value:alerts.length,sub:crit>0?`${crit} critical`:"All clear",color:crit>0?"#dc2626":"#059669"},
+    {key:"financial",label:"Value In-Flight",value:fmt$(fin.productCost),sub:"Product cost · active orders",color:"#059669"},
+  ];
   return(
     <div style={{padding:24}}>
-      <h2 style={{fontSize:18,fontWeight:500,margin:"0 0 18px"}}>Overview</h2>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:20}}>
-        {[{l:"Total Shipments",v:data.length,c:"#b45309"},{l:"In Transit",v:inTransit,c:"#7c3aed"},{l:"Arriving ≤ 7 days",v:arriving7,c:"#0e7490"},{l:"Active Alerts",v:alerts.length,c:crit>0?"#dc2626":"#b45309",click:()=>setTab("Alerts")}].map(c=>(
-          <div key={c.l} onClick={c.click} style={{background:V.bg,border:`0.5px solid ${V.border}`,borderRadius:12,padding:"14px 18px",borderTop:`3px solid ${c.c}`,cursor:c.click?"pointer":"default"}}>
-            <div style={{fontSize:12,color:V.text2,marginBottom:4}}>{c.l}</div>
-            <div style={{fontSize:28,fontWeight:500,color:c.c}}>{c.v}</div>
-            {c.l==="Active Alerts"&&crit>0&&<div style={{fontSize:11,color:"#dc2626",marginTop:2}}>{crit} critical</div>}
-          </div>
-        ))}
+      <div style={{marginBottom:22}}>
+        <div style={{fontSize:22,fontWeight:700,color:V.text,letterSpacing:"-0.02em"}}>Operations Dashboard</div>
+        <div style={{fontSize:12,color:V.text2,marginTop:4}}>{data.length} total shipments · {active.length} active</div>
       </div>
-      {alerts.length>0&&(
-        <div style={{background:"#fef2f2",border:"0.5px solid #fca5a5",borderRadius:8,padding:"10px 14px",marginBottom:18,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-          <span style={{fontSize:13,color:"#991b1b"}}>⛔ {crit} critical + {alerts.length-crit} warnings active</span>
-          <button onClick={()=>setTab("Alerts")} style={{fontSize:12,padding:"4px 12px",border:"0.5px solid #fca5a5",borderRadius:4,background:"transparent",cursor:"pointer",color:"#991b1b"}}>View all →</button>
+      {/* KPI CARDS */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:12,marginBottom:20}}>
+        {cards.map(c=>{
+          const isOpen=drill===c.key;
+          return(
+            <div key={c.key} onClick={()=>setDrill(isOpen?null:c.key)}
+              style={{background:V.bg,borderRadius:14,padding:"16px 18px",cursor:"pointer",position:"relative",overflow:"hidden",
+                border:isOpen?`1.5px solid ${c.color}`:`1px solid ${V.border}`,
+                boxShadow:isOpen?`0 0 0 4px ${c.color}18,0 6px 24px ${c.color}14`:"0 1px 4px rgba(0,0,0,.07),0 2px 10px rgba(0,0,0,.04)",
+                transition:"box-shadow 0.15s,border-color 0.15s"}}>
+              <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:c.color,borderRadius:"14px 14px 0 0"}}/>
+              <div style={{fontSize:10,fontWeight:700,color:V.text2,textTransform:"uppercase",letterSpacing:".07em",marginBottom:10}}>{c.label}</div>
+              <div style={{fontSize:32,fontWeight:800,color:c.color,lineHeight:1,marginBottom:6,letterSpacing:"-0.02em"}}>{c.value}</div>
+              <div style={{fontSize:11,color:V.text2}}>{c.sub}</div>
+              <div style={{position:"absolute",bottom:12,right:14,fontSize:11,color:c.color,fontWeight:700,opacity:0.7}}>{isOpen?"▲":"▼"}</div>
+            </div>
+          );
+        })}
+      </div>
+      {/* DRILL-DOWN */}
+      {drill&&(
+        <div style={{background:V.bg,border:`1px solid ${V.border}`,borderRadius:14,padding:20,marginBottom:20,boxShadow:"0 4px 24px rgba(0,0,0,.08)"}}>
+          <DashDrill drill={drill} active={active} inTransit={inTransit} arriving7={arriving7} alerts={alerts} alertPoSet={alertPoSet} fin={fin} itemSetup={itemSetup} num={num} setTab={setTab} onClose={()=>setDrill(null)}/>
         </div>
       )}
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:16}}>
-        <div style={{background:V.bg,border:`0.5px solid ${V.border}`,borderRadius:12,padding:16}}>
-          <div style={{fontSize:13,fontWeight:500,marginBottom:12}}>Shipping model breakdown</div>
-          {Object.entries(byModel).map(([k,v])=>(
-            <div key={k} style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
-              <div style={{width:10,height:10,borderRadius:2,background:MODEL_COLORS[k]}}/>
-              <span style={{fontSize:12,flex:1,color:V.text2}}>{k}</span>
-              <span style={{fontSize:12,fontWeight:500}}>{v}</span>
-              <div style={{width:80,height:6,background:V.bg2,borderRadius:3,overflow:"hidden"}}><div style={{width:`${data.length?Math.round(v/data.length*100):0}%`,height:"100%",background:MODEL_COLORS[k],borderRadius:3}}/></div>
+      {/* FINANCIAL SNAPSHOT */}
+      <div style={{marginBottom:20}}>
+        <div style={{fontSize:10,fontWeight:700,color:V.text2,textTransform:"uppercase",letterSpacing:".08em",marginBottom:10}}>Financial Snapshot — Active Orders Only</div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12}}>
+          {[{l:"Product Cost",v:fmt$(fin.productCost),c:"#059669",n:`Across ${active.length} active orders`},{l:"Container Cost",v:fmt$(fin.containerCost),c:"#f97316",n:"Direct container costs"},{l:"Drayage",v:fmt$(fin.drayage),c:"#7c3aed",n:"Port-to-warehouse"},{l:"Total In-Flight",v:fmt$(fin.total),c:"#0e7490",n:"All cost components"}].map(f=>(
+            <div key={f.l} style={{background:V.bg,border:`1px solid ${V.border}`,borderRadius:12,padding:"14px 16px",boxShadow:"0 1px 6px rgba(0,0,0,.06)",borderTop:`3px solid ${f.c}`}}>
+              <div style={{fontSize:10,fontWeight:700,color:f.c,textTransform:"uppercase",letterSpacing:".06em",marginBottom:7}}>{f.l}</div>
+              <div style={{fontSize:22,fontWeight:700,color:V.text,marginBottom:3}}>{f.v}</div>
+              <div style={{fontSize:11,color:V.text2}}>{f.n}</div>
             </div>
           ))}
         </div>
-        <div style={{background:V.bg,border:`0.5px solid ${V.border}`,borderRadius:12,padding:16}}>
-          <div style={{fontSize:13,fontWeight:500,marginBottom:10}}>Recent alerts</div>
-          {alerts.slice(0,5).map(a=>{const m=ALERT_META[a.type];return(<div key={a.id} style={{display:"flex",gap:8,marginBottom:8}}><span>{m.icon}</span><div><div style={{fontSize:12,fontWeight:500}}>{a.customer}</div><div style={{fontSize:11,color:V.text2}}>{a.message}</div></div></div>);})}
-          {alerts.length===0&&<div style={{fontSize:13,color:V.text2}}>No active alerts</div>}
+      </div>
+      {/* ALERTS BANNER */}
+      {alerts.length>0&&(
+        <div style={{background:"linear-gradient(135deg,#fef2f2,#fff7f7)",border:"1px solid #fca5a5",borderRadius:12,padding:"12px 18px",marginBottom:20,display:"flex",justifyContent:"space-between",alignItems:"center",boxShadow:"0 2px 8px rgba(220,38,38,.08)"}}>
+          <div style={{display:"flex",alignItems:"center",gap:12}}>
+            <span style={{fontSize:20}}>⛔</span>
+            <div>
+              <div style={{fontSize:13,fontWeight:700,color:"#991b1b"}}>{crit} critical alert{crit!==1?"s":""} require attention</div>
+              <div style={{fontSize:11,color:"#b91c1c"}}>{alerts.length-crit} warning{alerts.length-crit!==1?"s":""} also active</div>
+            </div>
+          </div>
+          <button onClick={()=>setTab("Alerts")} style={{fontSize:12,padding:"6px 16px",border:"1px solid #fca5a5",borderRadius:8,background:"#fff",cursor:"pointer",color:"#991b1b",fontWeight:600}}>View all →</button>
+        </div>
+      )}
+      {/* UPCOMING ARRIVALS */}
+      <div>
+        <div style={{fontSize:10,fontWeight:700,color:V.text2,textTransform:"uppercase",letterSpacing:".08em",marginBottom:10}}>Arrivals — Next 21 Days ({upcoming.length})</div>
+        {upcoming.length===0&&<div style={{background:V.bg,border:`1px solid ${V.border}`,borderRadius:12,padding:24,textAlign:"center",fontSize:13,color:V.text2,boxShadow:"0 1px 4px rgba(0,0,0,.05)"}}>No arrivals in the next 21 days</div>}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(210px,1fr))",gap:10}}>
+          {upcoming.map(r=>{
+            const d=daysDiff(parseDate(r["ETA"]));const ha=alertPoSet.has(r["LQC PO#"]);
+            const urgent=d<=3;const loc=r["Landing Location"]||r["Destination"]||r["POD"]||"—";
+            const isInternal=INTERNAL_LOCS.has(loc)||WAREHOUSE_LOCATIONS.slice(0,4).some(w=>loc.toLowerCase().includes(w.toLowerCase().split(" ")[0]));
+            return(
+              <div key={r["LQC PO#"]} style={{background:V.bg,borderRadius:11,padding:"12px 14px",cursor:"default",
+                border:`1px solid ${ha?"#fbbf24":urgent?"#fed7aa":V.border}`,
+                borderTop:`3px solid ${urgent?"#ef4444":d<=7?"#f97316":"#94a3b8"}`,
+                boxShadow:"0 1px 6px rgba(0,0,0,.06)"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:5}}>
+                  <div style={{fontSize:13,fontWeight:700,color:V.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1,marginRight:6}}>{r["Customer"]||"—"}{ha&&<span style={{marginLeft:4,fontSize:10,color:"#b45309"}}>⚠</span>}</div>
+                  <span style={{fontSize:11,fontWeight:800,color:urgent?"#ef4444":d<=7?"#f97316":"#64748b",whiteSpace:"nowrap",flexShrink:0}}>{d===0?"Today":d===1?"Tmrw":`${d}d`}</span>
+                </div>
+                <div style={{fontSize:10,color:V.text2,marginBottom:6,fontFamily:"monospace"}}>{r["LQC PO#"]}</div>
+                <div style={{display:"flex",alignItems:"center",gap:5}}>
+                  {isInternal&&<span style={{fontSize:9,background:"rgba(14,116,144,.12)",color:"#0e7490",borderRadius:3,padding:"1px 5px",fontWeight:700,flexShrink:0}}>WH</span>}
+                  <span style={{fontSize:11,color:V.text2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{loc}</span>
+                </div>
+                <div style={{fontSize:10,color:V.text2,marginTop:4}}>ETA {fmtDate(r["ETA"])}</div>
+              </div>
+            );
+          })}
         </div>
       </div>
-      <div style={{background:V.bg,border:`0.5px solid ${V.border}`,borderRadius:12,padding:16}}>
-        <div style={{fontSize:13,fontWeight:500,marginBottom:12}}>Arriving next 14 days</div>
-        {upcoming.length===0&&<div style={{fontSize:13,color:V.text2}}>None in this window</div>}
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(240px,1fr))",gap:8}}>
-          {upcoming.map(r=>{const d=daysDiff(parseDate(r["ETA"]));const ha=alertPoSet.has(r["LQC PO#"]);return(
-            <div key={r["LQC PO#"]} style={{background:ha?"#fffbeb":V.bg2,borderRadius:8,padding:"10px 12px",border:`0.5px solid ${ha?"#fbbf24":V.border}`}}>
-              <div style={{fontSize:12,fontWeight:500}}>{r["Customer"]}{ha&&<span style={{marginLeft:4,fontSize:10,color:"#b45309"}}>⚠</span>}</div>
-              <div style={{fontSize:11,color:V.text2,marginBottom:4}}>{r["LQC PO#"]}</div>
-              <div style={{display:"flex",justifyContent:"space-between"}}>
-                <span style={{fontSize:11,color:V.text2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:130}}>{r["Destination"]||r["POD"]}</span>
-                <span style={{fontSize:11,fontWeight:500,color:d<=3?"#dc2626":d<=7?"#b45309":"#065f46",whiteSpace:"nowrap",marginLeft:4}}>ETA {fmtDate(r["ETA"])}</span>
+    </div>
+  );
+}
+
+function DashDrill({drill,active,inTransit,arriving7,alerts,alertPoSet,fin,itemSetup,num,setTab,onClose}){
+  const rows={active,transit:inTransit,arriving:arriving7,financial:active}[drill]||[];
+  const TITLE={active:"All Active Orders",transit:"In Transit",arriving:"Arriving Within 7 Days",alerts:"Active Alerts",financial:"Financial Detail — Active Orders"};
+  const col={display:"grid",gap:10,padding:"8px 12px",fontSize:12,borderBottom:`0.5px solid ${V.border}`,alignItems:"center"};
+  const hd={...col,fontSize:10,fontWeight:700,color:V.text2,textTransform:"uppercase",letterSpacing:".05em",background:V.bg3,borderRadius:"8px 8px 0 0",border:"none",borderBottom:`0.5px solid ${V.border}`};
+  const cols=drill==="financial"?"2fr 1.5fr 1fr 1fr 1fr":"2fr 1.5fr 1fr 1fr 1fr";
+  return(
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+        <div>
+          <div style={{fontSize:15,fontWeight:700,color:V.text}}>{TITLE[drill]||"Details"}</div>
+          {drill!=="alerts"&&<div style={{fontSize:11,color:V.text2,marginTop:2}}>{rows.length} shipment{rows.length!==1?"s":""}</div>}
+        </div>
+        <button onClick={onClose} style={{fontSize:12,border:`1px solid ${V.border2}`,background:"transparent",cursor:"pointer",color:V.text2,padding:"5px 12px",borderRadius:6}}>✕ Close</button>
+      </div>
+      {drill==="alerts"&&(
+        <div>
+          {alerts.map(a=>{const m=ALERT_META[a.type];return(
+            <div key={a.id} style={{display:"flex",gap:12,padding:"10px 12px",borderBottom:`0.5px solid ${V.border}`,alignItems:"flex-start"}}>
+              <span style={{fontSize:18,flexShrink:0}}>{m.icon}</span>
+              <div style={{flex:1}}>
+                <div style={{display:"flex",gap:8,alignItems:"baseline",flexWrap:"wrap"}}>
+                  <span style={{fontSize:12,fontWeight:700,color:m.color}}>{m.label}</span>
+                  <span style={{fontSize:11,color:V.text2}}>— {a.po} · {a.customer}</span>
+                </div>
+                <div style={{fontSize:11,color:V.text2,marginTop:2}}>{a.message}</div>
               </div>
+              <span style={{fontSize:10,padding:"2px 8px",borderRadius:4,background:`${m.color}18`,color:m.color,fontWeight:700,whiteSpace:"nowrap"}}>{a.severity}</span>
             </div>
           );})}
+          {alerts.length===0&&<div style={{padding:24,textAlign:"center",fontSize:13,color:V.text2}}>No active alerts</div>}
         </div>
-      </div>
+      )}
+      {drill==="financial"&&(
+        <div style={{overflowX:"auto"}}>
+          <div style={{...hd,gridTemplateColumns:cols}}><span>PO / Customer</span><span>Landing Location</span><span>Status</span><span>Product Cost</span><span>Container+Dray</span></div>
+          {rows.map((r,i)=>{
+            const skus=Array.isArray(r["SKUs"])?r["SKUs"]:[];
+            const pc=skus.reduce((s,sk)=>s+num(sk.qty)*Number(itemSetup[sk.sku]?.cost||0),0);
+            const cc=num(r["Container Cost"]),dr=num(r["Drayage"]);
+            const loc=r["Landing Location"]||r["Destination"]||r["POD"]||"—";
+            return(
+              <div key={i} style={{...col,gridTemplateColumns:cols,background:i%2===0?V.bg:"rgba(0,0,0,.012)"}}>
+                <div><div style={{fontWeight:600}}>{r["LQC PO#"]}</div><div style={{fontSize:11,color:V.text2}}>{r["Customer"]}</div></div>
+                <div style={{display:"flex",alignItems:"center",gap:4}}>{INTERNAL_LOCS.has(loc)&&<span style={{fontSize:9,background:"rgba(14,116,144,.12)",color:"#0e7490",borderRadius:3,padding:"1px 4px",fontWeight:700,flexShrink:0}}>WH</span>}<span style={{fontSize:11,color:V.text2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{loc}</span></div>
+                <span style={{fontSize:10,padding:"2px 6px",borderRadius:4,background:`${STATUS_COLORS[r["Status"]]}18`,color:STATUS_COLORS[r["Status"]],fontWeight:600,whiteSpace:"nowrap",alignSelf:"flex-start"}}>{r["Status"]}</span>
+                <div style={{fontWeight:700,color:pc>0?"#059669":V.text2}}>{pc>0?`$${Math.round(pc).toLocaleString()}`:"—"}</div>
+                <div style={{color:(cc+dr)>0?"#f97316":V.text2,fontWeight:(cc+dr)>0?600:400}}>{(cc+dr)>0?`$${Math.round(cc+dr).toLocaleString()}`:"—"}</div>
+              </div>
+            );
+          })}
+          {rows.length===0&&<div style={{padding:24,textAlign:"center",fontSize:13,color:V.text2}}>No active orders</div>}
+        </div>
+      )}
+      {!["alerts","financial"].includes(drill)&&(
+        <div style={{overflowX:"auto"}}>
+          <div style={{...hd,gridTemplateColumns:cols}}><span>PO / Customer</span><span>Landing Location</span><span>ETA</span><span>Status</span><span>Agent</span></div>
+          {rows.map((r,i)=>{
+            const eta=parseDate(r["ETA"]);const d=daysDiff(eta);const ha=alertPoSet.has(r["LQC PO#"]);
+            const loc=r["Landing Location"]||r["Destination"]||r["POD"]||"—";
+            return(
+              <div key={i} style={{...col,gridTemplateColumns:cols,background:ha?"rgba(251,191,36,.06)":i%2===0?V.bg:"rgba(0,0,0,.012)"}}>
+                <div><div style={{fontWeight:600}}>{r["LQC PO#"]}{ha&&<span style={{marginLeft:4,fontSize:10,color:"#b45309"}}>⚠</span>}</div><div style={{fontSize:11,color:V.text2}}>{r["Customer"]}</div></div>
+                <div style={{display:"flex",alignItems:"center",gap:4}}>{INTERNAL_LOCS.has(loc)&&<span style={{fontSize:9,background:"rgba(14,116,144,.12)",color:"#0e7490",borderRadius:3,padding:"1px 4px",fontWeight:700,flexShrink:0}}>WH</span>}<span style={{fontSize:11,color:V.text2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{loc}</span></div>
+                <div style={{fontWeight:500,color:d!==null&&d<0?"#dc2626":d!==null&&d<=3?"#ea580c":V.text}}>{fmtDate(r["ETA"])}{d!==null&&<div style={{fontSize:10,color:V.text2}}>{d===0?"today":d===1?"tomorrow":d<0?`${Math.abs(d)}d overdue`:`in ${d}d`}</div>}</div>
+                <span style={{fontSize:10,padding:"2px 6px",borderRadius:4,background:`${STATUS_COLORS[r["Status"]]}18`,color:STATUS_COLORS[r["Status"]],fontWeight:600,alignSelf:"flex-start"}}>{r["Status"]}</span>
+                <div style={{fontSize:11,color:V.text2}}>{r["Agent"]||"—"}</div>
+              </div>
+            );
+          })}
+          {rows.length===0&&<div style={{padding:24,textAlign:"center",fontSize:13,color:V.text2}}>No shipments in this category</div>}
+        </div>
+      )}
     </div>
   );
 }
@@ -482,7 +613,7 @@ function Shipments({data,alerts,quickStatus,setEditRow,selected,toggleSelect,tog
                       <tr key={po+"_exp"}>
                         <td colSpan={12} style={{padding:"12px 16px",background:V.bg2,borderBottom:`0.5px solid ${V.border}`}}>
                           <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:10}}>
-                            {[["Container #",r["Container #"]],["BOL #",r["BOL #"]],["O/F",r["O/F"]],["Containers",r["Container Qty"]&&r["Container Size"]?`${r["Container Qty"]} × ${r["Container Size"]}`:(r["Container Qty"]||r["Container Size"]||"—")],["Volume (CBM)",r["Volume"]||"—"],["MABD",fmtDate(r["MABD"])],["Invoice #",r["Invoice #"]],["POD",r["POD"]],["Container Cost",r["Container Cost"]?`$${Number(r["Container Cost"]).toLocaleString(undefined,{maximumFractionDigits:0})}`:"—"],["Drayage",r["Drayage"]?`$${Number(r["Drayage"]).toLocaleString(undefined,{maximumFractionDigits:0})}`:"—"],["Note",r["Note"]]].map(([l,v])=>(
+                            {[["Container #",r["Container #"]],["BOL #",r["BOL #"]],["O/F",r["O/F"]],["Containers",r["Container Qty"]&&r["Container Size"]?`${r["Container Qty"]} × ${r["Container Size"]}`:(r["Container Qty"]||r["Container Size"]||"—")],["Volume (CBM)",r["Volume"]||"—"],["Landing Location",r["Landing Location"]||"—"],["MABD",fmtDate(r["MABD"])],["Invoice #",r["Invoice #"]],["POD",r["POD"]],["Container Cost",r["Container Cost"]?`$${Number(r["Container Cost"]).toLocaleString(undefined,{maximumFractionDigits:0})}`:"—"],["Drayage",r["Drayage"]?`$${Number(r["Drayage"]).toLocaleString(undefined,{maximumFractionDigits:0})}`:"—"],["Note",r["Note"]]].map(([l,v])=>(
                               <div key={l}><div style={{fontSize:10,color:V.text2}}>{l}</div><div style={{fontSize:12}}>{v||"—"}</div></div>
                             ))}
                           </div>
@@ -532,70 +663,146 @@ function Shipments({data,alerts,quickStatus,setEditRow,selected,toggleSelect,tog
 }
 
 // ─── SKU SEARCH ───────────────────────────────────────────
-function SKUSearch({data,alerts}){
+function SKUSearch({data,alerts,itemSetup}){
+  itemSetup=itemSetup||{};
   const [q,setQ]=useState("");
-  const alertPoSet=new Set(alerts.map(a=>a.po));
+  const [selectedSku,setSelectedSku]=useState(null);
   const allSkus=useMemo(()=>{
     const map={};
     data.forEach(r=>{
       const skus=Array.isArray(r["SKUs"])?r["SKUs"]:[];
       skus.forEach(s=>{
-        if(!map[s.sku])map[s.sku]=[];
-        map[s.sku].push({...r,matchSku:s});
+        if(!s.sku)return;
+        if(!map[s.sku])map[s.sku]={active:[],delivered:[],totalQty:0,activeQty:0,unit:s.unit||"units"};
+        const qty=Number(s.qty||0);
+        map[s.sku].totalQty+=qty;
+        if(r["Status"]==="Delivered"){map[s.sku].delivered.push({...r,matchSku:s});}
+        else{map[s.sku].active.push({...r,matchSku:s});map[s.sku].activeQty+=qty;}
       });
     });
     return map;
   },[data]);
-  const results=useMemo(()=>{
+  const top10=useMemo(()=>Object.entries(allSkus).sort((a,b)=>(b[1].activeQty||b[1].totalQty)-(a[1].activeQty||a[1].totalQty)).slice(0,10),[allSkus]);
+  const searchResults=useMemo(()=>{
     if(!q||q.length<2)return[];
     const ql=q.toLowerCase();
     return Object.entries(allSkus).filter(([k])=>k.toLowerCase().includes(ql)).sort((a,b)=>a[0].localeCompare(b[0]));
   },[q,allSkus]);
+  const list=q.length>=2?searchResults:top10;
+  const inSearch=q.length>=2;
+  function locSummary(delivered){
+    const byLoc={};
+    delivered.forEach(r=>{
+      const loc=r["Landing Location"]||r["Destination"]||r["POD"]||"Unknown";
+      const eta=parseDate(r["ETA"]);
+      if(!byLoc[loc]||(eta&&(!parseDate(byLoc[loc]["ETA"])||eta>parseDate(byLoc[loc]["ETA"]))))byLoc[loc]=r;
+    });
+    return Object.entries(byLoc).sort((a,b)=>new Date(b[1]["ETA"]||0)-new Date(a[1]["ETA"]||0));
+  }
+  const selInfo=selectedSku?allSkus[selectedSku]:null;
+  const costPer=selectedSku?Number(itemSetup[selectedSku]?.cost||0):0;
   return(
     <div style={{padding:24}}>
-      <h2 style={{fontSize:18,fontWeight:500,margin:"0 0 6px"}}>SKU / Product search</h2>
-      <div style={{fontSize:12,color:V.text2,marginBottom:16}}>Search any product to see all shipments containing it.</div>
-      <input value={q} onChange={e=>setQ(e.target.value)} placeholder="e.g. 'Coconut Water', 'Virgin Coconut Oil', 'Flour'…" autoFocus style={{width:"100%",fontSize:14,padding:"10px 14px",border:`0.5px solid ${V.border2}`,borderRadius:8,background:V.bg,color:V.text,marginBottom:20}}/>
-      {q.length>=2&&results.length===0&&<div style={{textAlign:"center",padding:"40px 0",color:V.text2,fontSize:13}}>No products found matching "{q}"</div>}
-      {results.map(([skuName,rows])=>{
-        const totalQty=rows.reduce((s,r)=>s+Number(r.matchSku.qty||0),0);
-        return(
-          <div key={skuName} style={{background:V.bg,border:`0.5px solid ${V.border}`,borderRadius:12,marginBottom:16,overflow:"hidden"}}>
-            <div style={{padding:"12px 16px",background:V.bg2,borderBottom:`0.5px solid ${V.border}`,display:"flex",justifyContent:"space-between"}}>
-              <div>
-                <div style={{fontSize:13,fontWeight:500,marginBottom:2}}>{skuName}</div>
-                <div style={{fontSize:11,color:V.text2}}>{rows.length} shipment{rows.length!==1?"s":""} · {totalQty.toLocaleString()} {rows[0].matchSku.unit} total</div>
+      <div style={{marginBottom:18}}>
+        <div style={{fontSize:20,fontWeight:700,color:V.text,letterSpacing:"-0.01em"}}>Product Lookup</div>
+        <div style={{fontSize:12,color:V.text2,marginTop:4}}>{inSearch?`Searching ${Object.keys(allSkus).length} products`:"Top 10 active products — click to drill down"}</div>
+      </div>
+      <input value={q} onChange={e=>{setQ(e.target.value);setSelectedSku(null);}} placeholder="Search products…" autoFocus
+        style={{width:"100%",fontSize:14,padding:"10px 14px",border:`1px solid ${V.border2}`,borderRadius:10,background:V.bg,color:V.text,marginBottom:20,boxShadow:"0 1px 6px rgba(0,0,0,.06)"}}/>
+      <div style={{display:"grid",gridTemplateColumns:selectedSku?"300px 1fr":"1fr",gap:16,alignItems:"start"}}>
+        {/* LIST */}
+        <div>
+          <div style={{fontSize:10,fontWeight:700,color:V.text2,textTransform:"uppercase",letterSpacing:".07em",marginBottom:10}}>
+            {inSearch?`Results (${list.length})`:"Top 10 Active Products"}
+          </div>
+          {inSearch&&list.length===0&&<div style={{fontSize:13,color:V.text2,padding:"20px 0"}}>No products found matching "{q}"</div>}
+          {list.map(([name,info])=>{
+            const isSel=selectedSku===name;
+            return(
+              <div key={name} onClick={()=>setSelectedSku(isSel?null:name)}
+                style={{background:isSel?`rgba(180,87,9,.05)`:V.bg,border:`1px solid ${isSel?"#b45309":V.border}`,borderRadius:10,padding:"12px 14px",marginBottom:8,cursor:"pointer",
+                  boxShadow:isSel?"0 0 0 3px rgba(180,87,9,.12),0 2px 8px rgba(0,0,0,.06)":"0 1px 4px rgba(0,0,0,.05)",transition:"all 0.1s"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+                  <div style={{fontSize:13,fontWeight:700,color:isSel?"#b45309":V.text,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{name}</div>
+                  <div style={{display:"flex",gap:5,flexShrink:0}}>
+                    {info.active.length>0&&<span style={{fontSize:10,background:"rgba(14,116,144,.1)",color:"#0e7490",borderRadius:4,padding:"2px 6px",fontWeight:700}}>{info.active.length} active</span>}
+                    {info.delivered.length>0&&<span style={{fontSize:10,background:"rgba(55,65,81,.08)",color:"#374151",borderRadius:4,padding:"2px 6px"}}>{info.delivered.length} del.</span>}
+                  </div>
+                </div>
+                <div style={{fontSize:11,color:V.text2,marginTop:4}}>
+                  {info.activeQty>0?`${info.activeQty.toLocaleString()} active`:`${info.totalQty.toLocaleString()} total`} {info.unit}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        {/* DETAIL */}
+        {selectedSku&&selInfo&&(
+          <div style={{background:V.bg,border:`1px solid ${V.border}`,borderRadius:12,overflow:"hidden",boxShadow:"0 2px 12px rgba(0,0,0,.07)"}}>
+            <div style={{padding:"16px 20px",background:V.bg3,borderBottom:`1px solid ${V.border}`}}>
+              <div style={{fontSize:17,fontWeight:800,color:V.text,marginBottom:4}}>{selectedSku}</div>
+              <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+                <span style={{fontSize:11,color:V.text2}}>{selInfo.active.length} in progress</span>
+                <span style={{fontSize:11,color:V.text2}}>·</span>
+                <span style={{fontSize:11,color:V.text2}}>{selInfo.delivered.length} delivered</span>
+                <span style={{fontSize:11,color:V.text2}}>·</span>
+                <span style={{fontSize:11,color:V.text2}}>{selInfo.totalQty.toLocaleString()} total {selInfo.unit}</span>
+                {costPer>0&&<><span style={{fontSize:11,color:V.text2}}>·</span><span style={{fontSize:11,color:"#059669",fontWeight:600}}>${costPer.toFixed(2)}/unit</span></>}
               </div>
             </div>
-            <div style={{overflowX:"auto"}}>
-              <table style={{width:"100%",borderCollapse:"collapse",minWidth:600}}>
-                <thead><tr style={{fontSize:11,color:V.text2,background:V.bg2}}>
-                  {["LQC PO#","Customer","Qty","ETD","ETA","Destination","Status"].map(h=><th key={h} style={{padding:"6px 12px",textAlign:"left",fontWeight:500,borderBottom:`0.5px solid ${V.border}`}}>{h}</th>)}
-                </tr></thead>
-                <tbody>
-                  {rows.map((r,i)=>{
-                    const eta=parseDate(r["ETA"]);
-                    const ha=alertPoSet.has(r["LQC PO#"]);
-                    const etaColor=eta&&r["Status"]==="In Transit"?(daysDiff(eta)<0?"#dc2626":daysDiff(eta)<=3?"#b45309":V.text):V.text;
+            {/* IN PROGRESS */}
+            {selInfo.active.length>0&&(
+              <div style={{padding:"14px 20px",borderBottom:`1px solid ${V.border}`}}>
+                <div style={{fontSize:10,fontWeight:700,color:"#0e7490",textTransform:"uppercase",letterSpacing:".07em",marginBottom:12}}>In Progress — {selInfo.active.length} Shipment{selInfo.active.length!==1?"s":""}</div>
+                {selInfo.active.map((r,i)=>{
+                  const eta=parseDate(r["ETA"]);const d=daysDiff(eta);
+                  const loc=r["Landing Location"]||r["Destination"]||r["POD"]||"—";
+                  const isWH=INTERNAL_LOCS.has(loc);
+                  const lineTotal=Number(r.matchSku.qty||0)*costPer;
+                  return(
+                    <div key={i} style={{display:"grid",gridTemplateColumns:"2fr 1.5fr 1fr 1fr",gap:10,padding:"8px 0",borderTop:i>0?`0.5px solid ${V.border}`:"none",fontSize:12,alignItems:"center"}}>
+                      <div><div style={{fontWeight:700}}>{r["LQC PO#"]}</div><div style={{fontSize:11,color:V.text2}}>{r["Customer"]}</div></div>
+                      <div style={{display:"flex",alignItems:"center",gap:5}}>{isWH&&<span style={{fontSize:9,background:"rgba(14,116,144,.1)",color:"#0e7490",borderRadius:3,padding:"1px 4px",fontWeight:700,flexShrink:0}}>WH</span>}<span style={{fontSize:11,color:V.text2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{loc}</span></div>
+                      <div style={{fontSize:11,fontWeight:500,color:d!==null&&d<0?"#dc2626":d!==null&&d<=3?"#ea580c":V.text}}>{fmtDate(r["ETA"])}</div>
+                      <span style={{fontSize:10,padding:"2px 6px",borderRadius:4,background:`${STATUS_COLORS[r["Status"]]}18`,color:STATUS_COLORS[r["Status"]],fontWeight:600,justifySelf:"start"}}>{r["Status"]}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {selInfo.active.length===0&&(
+              <div style={{padding:"14px 20px",borderBottom:`1px solid ${V.border}`}}>
+                <div style={{fontSize:10,fontWeight:700,color:"#0e7490",textTransform:"uppercase",letterSpacing:".07em",marginBottom:8}}>In Progress</div>
+                <div style={{fontSize:12,color:V.text2}}>No active shipments for this product.</div>
+              </div>
+            )}
+            {/* RECENT BY LOCATION */}
+            {(()=>{
+              const locs=locSummary(selInfo.delivered);
+              return(
+                <div style={{padding:"14px 20px"}}>
+                  <div style={{fontSize:10,fontWeight:700,color:"#059669",textTransform:"uppercase",letterSpacing:".07em",marginBottom:12}}>Most Recent Delivery by Location</div>
+                  {locs.length===0&&<div style={{fontSize:12,color:V.text2}}>No deliveries on record.</div>}
+                  {locs.map(([loc,r],i)=>{
+                    const isWH=INTERNAL_LOCS.has(loc);
                     return(
-                      <tr key={r["LQC PO#"]+i} style={{borderBottom:`0.5px solid ${V.border}`,background:ha?"rgba(251,191,36,.05)":i%2===0?V.bg:"rgba(0,0,0,.01)"}}>
-                        <td style={{padding:"6px 12px",fontSize:12}}>{ha&&<span style={{marginRight:3,fontSize:10}}>⚠</span>}{r["LQC PO#"]}</td>
-                        <td style={{padding:"6px 12px",fontSize:12}}>{r["Customer"]}</td>
-                        <td style={{padding:"6px 12px",fontSize:12,fontWeight:500}}>{Number(r.matchSku.qty||0).toLocaleString()}</td>
-                        <td style={{padding:"6px 12px",fontSize:12}}>{fmtDate(r["ETD"])}</td>
-                        <td style={{padding:"6px 12px",fontSize:12,color:etaColor,fontWeight:500}}>{fmtDate(r["ETA"])}</td>
-                        <td style={{padding:"6px 12px",fontSize:12,color:V.text2}}>{r["Destination"]||r["POD"]||"—"}</td>
-                        <td style={{padding:"6px 12px",fontSize:11}}><span style={{background:`${STATUS_COLORS[r["Status"]]}22`,color:STATUS_COLORS[r["Status"]],padding:"2px 6px",borderRadius:4}}>{r["Status"]}</span></td>
-                      </tr>
+                      <div key={i} style={{display:"grid",gridTemplateColumns:"2fr 2fr 1.5fr",gap:10,padding:"8px 0",borderTop:i>0?`0.5px solid ${V.border}`:"none",fontSize:12,alignItems:"center"}}>
+                        <div style={{display:"flex",alignItems:"center",gap:5}}>
+                          {isWH&&<span style={{fontSize:9,background:"rgba(14,116,144,.1)",color:"#0e7490",borderRadius:3,padding:"1px 4px",fontWeight:700,flexShrink:0}}>WH</span>}
+                          <span style={{fontWeight:700,color:V.text}}>{loc}</span>
+                        </div>
+                        <div style={{fontSize:11,color:V.text2}}>{r["LQC PO#"]} · {r["Customer"]}</div>
+                        <div style={{fontSize:11,color:V.text2}}>Delivered {fmtDate(r["ETA"])}</div>
+                      </div>
                     );
                   })}
-                </tbody>
-              </table>
-            </div>
+                </div>
+              );
+            })()}
           </div>
-        );
-      })}
-      {q.length<2&&<div style={{textAlign:"center",padding:"40px 0",color:V.text2}}><div style={{fontSize:32,marginBottom:8}}>🔍</div><div style={{fontSize:13}}>Type at least 2 characters to search</div></div>}
+        )}
+      </div>
+      {!inSearch&&list.length===0&&<div style={{textAlign:"center",padding:"40px 0",color:V.text2}}><div style={{fontSize:32,marginBottom:8}}>📦</div><div style={{fontSize:13}}>No shipment data yet</div></div>}
     </div>
   );
 }
@@ -1243,7 +1450,7 @@ function Manage({data,saveRow,deleteRow,syncing,skuCatalog}){
   const [newRow,setNewRow]=useState(null);
   const blank=()=>({
     "LQC PO#":"","Customer":"","Customer PO":"","SKUs":[{sku:"",qty:"",unit:"CTN"}],
-    "Volume":"","Container Qty":"","Container Size":"",
+    "Volume":"","Container Qty":"","Container Size":"","Landing Location":"",
     "ETD":"","ETA":"","POD":"","Destination":"","Agent":"",
     "Container #":"","BOL #":"","O/F":"","Invoice #":"","MABD":"","Note":"",
     "Container Cost":"","Drayage":"",
@@ -1316,6 +1523,12 @@ function ShipmentForm({row,setRow,onSave,onCancel,syncing,skuCatalog}){
         ))}
         <div><label style={lbl}>Status</label><select value={row["Status"]} onChange={e=>set("Status",e.target.value)} style={fld}>{STATUSES.map(s=><option key={s}>{s}</option>)}</select></div>
         <div><label style={lbl}>Shipping model</label><select value={row["Shipping Model"]} onChange={e=>set("Shipping Model",e.target.value)} style={fld}>{["Direct to Client","US Warehouse","Port Pickup"].map(m=><option key={m}>{m}</option>)}</select></div>
+        <div style={{gridColumn:"1 / -1"}}><label style={lbl}>Landing Location <span style={{fontSize:10,color:"#0e7490",fontWeight:600,background:"rgba(14,116,144,.1)",borderRadius:3,padding:"1px 5px",marginLeft:4}}>WH</span></label>
+          <select value={row["Landing Location"]||""} onChange={e=>set("Landing Location",e.target.value)} style={fld}>
+            <option value="">Select warehouse / destination…</option>
+            {WAREHOUSE_LOCATIONS.map(l=><option key={l}>{l}</option>)}
+          </select>
+        </div>
       </div>
       <div style={{background:V.bg3,border:`0.5px solid ${V.border}`,borderRadius:8,padding:"12px 14px",marginBottom:14}}>
         <div style={{fontSize:11,fontWeight:600,color:V.text2,textTransform:"uppercase",letterSpacing:".05em",marginBottom:10}}>Container & Volume</div>
@@ -1380,6 +1593,12 @@ function EditModal({row,onSave,onClose,syncing,skuCatalog}){
           ))}
           <div><label style={lbl}>Status</label><select value={r["Status"]} onChange={e=>set("Status",e.target.value)} style={fld}>{STATUSES.map(s=><option key={s}>{s}</option>)}</select></div>
           <div><label style={lbl}>Shipping model</label><select value={r["Shipping Model"]} onChange={e=>set("Shipping Model",e.target.value)} style={fld}>{["Direct to Client","US Warehouse","Port Pickup"].map(m=><option key={m}>{m}</option>)}</select></div>
+          <div style={{gridColumn:"1 / -1"}}><label style={lbl}>Landing Location <span style={{fontSize:10,color:"#0e7490",fontWeight:600,background:"rgba(14,116,144,.1)",borderRadius:3,padding:"1px 5px",marginLeft:4}}>WH</span></label>
+            <select value={r["Landing Location"]||""} onChange={e=>set("Landing Location",e.target.value)} style={fld}>
+              <option value="">Select warehouse / destination…</option>
+              {WAREHOUSE_LOCATIONS.map(l=><option key={l}>{l}</option>)}
+            </select>
+          </div>
         </div>
         <div style={{background:V.bg3,border:`0.5px solid ${V.border}`,borderRadius:8,padding:"12px 14px",marginBottom:12}}>
           <div style={{fontSize:11,fontWeight:600,color:V.text2,textTransform:"uppercase",letterSpacing:".05em",marginBottom:10}}>Container & Volume</div>
