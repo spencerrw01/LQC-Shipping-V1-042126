@@ -870,148 +870,221 @@ function Analytics({data,itemSetup}){
   const total=metrics.totals.shipments||1;
   const sel={fontSize:12,padding:"6px 10px",border:`0.5px solid ${V.border2}`,borderRadius:8,background:V.bg,color:V.text};
 
+  const activeFilters=[fC!=="All",fM!=="All",fA!=="All",fS!=="All",df!=="",dt!==""].filter(Boolean).length;
+  function clearFilters(){setFC("All");setFM("All");setFA("All");setFS("All");setDF("");setDT("");}
+
   const insightCards=[
-    {title:"Total product cost",value:`$${Math.round(metrics.totals.productCost).toLocaleString()}`,note:"Real cost from unit prices in Item Setup",color:"#059669"},
+    {title:"Total Product Cost",value:`$${Math.round(metrics.totals.productCost).toLocaleString()}`,note:"From unit costs set in Item Setup",color:"#059669"},
     {title:"Container + Drayage",value:`$${Math.round(metrics.totals.logisticsCost).toLocaleString()}`,note:`Container $${Math.round(metrics.totals.containerCost).toLocaleString()} · Drayage $${Math.round(metrics.totals.drayage).toLocaleString()}`,color:"#f97316"},
-    {title:"Est. landed cost",value:`$${Math.round(metrics.totals.estLanded).toLocaleString()}`,note:`Est. freight + ${dutyPct}% duty`,color:"#7c3aed"},
-    {title:"Transit reliability",value:`${metrics.totals.onTimeRate}%`,note:"Shipments meeting lane benchmarks",color:"#0e7490"},
-    {title:"Delay risk",value:`$${Math.round(metrics.totals.delayRisk).toLocaleString()}`,note:"Projected over-ETA holding impact",color:"#dc2626"}
+    {title:"Est. Landed Cost",value:`$${Math.round(metrics.totals.estLanded).toLocaleString()}`,note:`Est. freight + ${dutyPct}% duty`,color:"#7c3aed"},
+    {title:"Transit Reliability",value:`${metrics.totals.onTimeRate}%`,note:"Shipments within lane benchmarks",color:"#0e7490"},
+    {title:"Delay Risk Exposure",value:`$${Math.round(metrics.totals.delayRisk).toLocaleString()}`,note:"Projected over-ETA holding cost",color:"#dc2626"},
   ];
 
   return(
     <div style={{padding:24}}>
-      <div style={{background:"linear-gradient(135deg,#0f172a,#1e293b)",borderRadius:16,padding:18,marginBottom:16,color:"#e2e8f0",boxShadow:"0 14px 40px rgba(15,23,42,.28)"}}>
-        <div style={{fontSize:11,letterSpacing:".08em",textTransform:"uppercase",opacity:.8,marginBottom:8}}>Robust analytics studio</div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(4,minmax(140px,1fr))",gap:10}}>
-          {[{l:"Filtered Shipments",v:metrics.totals.shipments},{l:"Total Volume (CBM)",v:metrics.totals.volume.toLocaleString()},{l:"Total SKU Units",v:Math.round(metrics.totals.skuQty).toLocaleString()},{l:"Product Cost",v:`$${Math.round(metrics.totals.productCost).toLocaleString()}`}].map(c=>(
-            <div key={c.l} style={{background:"rgba(148,163,184,.15)",border:"1px solid rgba(148,163,184,.2)",borderRadius:10,padding:"10px 12px"}}>
-              <div style={{fontSize:10,opacity:.75,marginBottom:3}}>{c.l}</div>
-              <div style={{fontSize:22,fontWeight:600,color:"#f8fafc"}}>{c.v}</div>
-            </div>
-          ))}
+
+      {/* PAGE HEADER */}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20}}>
+        <div>
+          <h2 style={{fontSize:20,fontWeight:600,margin:0,color:V.text}}>Analytics</h2>
+          <div style={{fontSize:12,color:V.text2,marginTop:4,display:"flex",alignItems:"center",gap:8}}>
+            {f.length} of {data.length} shipments
+            {activeFilters>0&&<span style={{background:"#fef3c7",color:"#92400e",fontSize:10,padding:"2px 8px",borderRadius:10,fontWeight:600}}>{activeFilters} filter{activeFilters>1?"s":""} active</span>}
+          </div>
         </div>
+        {activeFilters>0&&<button onClick={clearFilters} style={{fontSize:12,padding:"6px 14px",border:`0.5px solid ${V.border2}`,borderRadius:8,background:"transparent",cursor:"pointer",color:V.text2}}>✕ Clear filters</button>}
       </div>
 
-      <div style={{display:"grid",gridTemplateColumns:"2fr 1fr",gap:12,marginBottom:16}}>
-        <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"flex-end",background:V.bg,border:`0.5px solid ${V.border}`,borderRadius:12,padding:12}}>
-          {[["Customer",<select value={fC} onChange={e=>setFC(e.target.value)} style={sel}>{customers.map(c=><option key={c}>{c}</option>)}</select>],["Shipping Model",<select value={fM} onChange={e=>setFM(e.target.value)} style={sel}>{["All","Direct to Client","US Warehouse","Port Pickup"].map(m=><option key={m}>{m}</option>)}</select>],["Agent",<select value={fA} onChange={e=>setFA(e.target.value)} style={sel}>{agents.map(a=><option key={a}>{a}</option>)}</select>],["Status",<select value={fS} onChange={e=>setFS(e.target.value)} style={sel}><option>All</option>{STATUSES.map(s=><option key={s}>{s}</option>)}</select>],["Date Field",<select value={dateField} onChange={e=>setDateField(e.target.value)} style={sel}>{["ETD","ETA"].map(d=><option key={d}>{d}</option>)}</select>]].map(([label,control])=>(
-            <div key={label} style={{display:"flex",flexDirection:"column",gap:3}}>
-              <span style={{fontSize:10,fontWeight:500,color:V.text2,textTransform:"uppercase",letterSpacing:".04em"}}>{label}</span>
+      {/* FILTERS */}
+      <div style={{background:V.bg,border:`0.5px solid ${V.border}`,borderRadius:12,padding:"14px 16px",marginBottom:16}}>
+        <div style={{fontSize:10,fontWeight:600,color:V.text2,textTransform:"uppercase",letterSpacing:".07em",marginBottom:12}}>Filters</div>
+        <div style={{display:"flex",gap:14,flexWrap:"wrap",alignItems:"flex-end"}}>
+          {[
+            ["Customer",<select value={fC} onChange={e=>setFC(e.target.value)} style={sel}>{customers.map(c=><option key={c}>{c}</option>)}</select>],
+            ["Shipping Model",<select value={fM} onChange={e=>setFM(e.target.value)} style={sel}>{["All","Direct to Client","US Warehouse","Port Pickup"].map(m=><option key={m}>{m}</option>)}</select>],
+            ["Agent",<select value={fA} onChange={e=>setFA(e.target.value)} style={sel}>{agents.map(a=><option key={a}>{a}</option>)}</select>],
+            ["Status",<select value={fS} onChange={e=>setFS(e.target.value)} style={sel}><option>All</option>{STATUSES.map(s=><option key={s}>{s}</option>)}</select>],
+            ["Date Type",<select value={dateField} onChange={e=>setDateField(e.target.value)} style={sel}>{["ETD","ETA"].map(d=><option key={d}>{d}</option>)}</select>],
+          ].map(([label,control])=>(
+            <div key={label} style={{display:"flex",flexDirection:"column",gap:4}}>
+              <span style={{fontSize:10,fontWeight:600,color:V.text2,textTransform:"uppercase",letterSpacing:".05em"}}>{label}</span>
               {control}
             </div>
           ))}
-          <div style={{display:"flex",flexDirection:"column",gap:3}}>
-            <span style={{fontSize:10,fontWeight:500,color:V.text2,textTransform:"uppercase",letterSpacing:".04em"}}>Date Range</span>
+          <div style={{display:"flex",flexDirection:"column",gap:4}}>
+            <span style={{fontSize:10,fontWeight:600,color:V.text2,textTransform:"uppercase",letterSpacing:".05em"}}>Date Range</span>
             <div style={{display:"flex",alignItems:"center",gap:6}}>
               <input type="date" value={df} onChange={e=>setDF(e.target.value)} style={sel}/>
-              <span style={{fontSize:11,color:V.text2}}>to</span>
+              <span style={{fontSize:12,color:V.text2}}>→</span>
               <input type="date" value={dt} onChange={e=>setDT(e.target.value)} style={sel}/>
             </div>
           </div>
         </div>
-        <div style={{background:V.bg,border:`0.5px solid ${V.border}`,borderRadius:12,padding:12}}>
-          <div style={{fontSize:11,color:V.text2,marginBottom:6}}>Financial assumptions</div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-            <label style={{fontSize:11,color:V.text2}}>Freight/CBM<input type="number" value={freightPerCbm} onChange={e=>setFreightPerCbm(e.target.value)} style={{...sel,width:"100%",marginTop:2}}/></label>
-            <label style={{fontSize:11,color:V.text2}}>Duty %<input type="number" value={dutyPct} onChange={e=>setDutyPct(e.target.value)} style={{...sel,width:"100%",marginTop:2}}/></label>
-            <label style={{fontSize:11,color:V.text2,gridColumn:"1 / -1"}}>Delay $/day<input type="number" value={delayCostPerDay} onChange={e=>setDelayCostPerDay(e.target.value)} style={{...sel,width:"100%",marginTop:2}}/></label>
-          </div>
-        </div>
       </div>
 
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:14}}>
-        {[ ["Shipping model",Object.entries(MODEL_COLORS),metrics.byModel],["Status",Object.entries(STATUS_COLORS),metrics.byStatus] ].map(([title,pairs,map])=>(
-          <div key={title} style={{background:V.bg,border:`0.5px solid ${V.border}`,borderRadius:12,padding:16}}>
-            <div style={{fontSize:13,fontWeight:600,marginBottom:12}}>{title}</div>
-            {pairs.map(([k,c])=>{const v=map[k]||0;const pct=Math.round(v/total*100);return(
-              <div key={k} style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
-                <span style={{width:10,height:10,borderRadius:3,background:c}}/>
-                <span style={{fontSize:12,flex:1,color:V.text2}}>{k}</span>
-                <span style={{fontSize:12,fontWeight:600,width:24,textAlign:"right"}}>{v}</span>
-                <div style={{height:8,flex:1,maxWidth:130,background:V.bg2,borderRadius:999,overflow:"hidden"}}><div style={{height:"100%",width:`${pct}%`,background:c}}/></div>
-                <span style={{fontSize:10,color:V.text2,width:28,textAlign:"right"}}>{pct}%</span>
-              </div>
-            );})}
+      {/* KPI STRIP */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:10,marginBottom:16}}>
+        {[
+          {l:"Shipments",v:String(metrics.totals.shipments),c:"#b45309"},
+          {l:"Volume (CBM)",v:metrics.totals.volume.toLocaleString(),c:"#0e7490"},
+          {l:"SKU Units",v:Math.round(metrics.totals.skuQty).toLocaleString(),c:"#7c3aed"},
+          {l:"Product Cost",v:`$${Math.round(metrics.totals.productCost).toLocaleString()}`,c:"#059669"},
+          {l:"Container + Drayage",v:`$${Math.round(metrics.totals.logisticsCost).toLocaleString()}`,c:"#f97316"},
+        ].map(c=>(
+          <div key={c.l} style={{background:V.bg,border:`0.5px solid ${V.border}`,borderRadius:12,padding:"14px 16px",borderTop:`3px solid ${c.c}`}}>
+            <div style={{fontSize:11,color:V.text2,marginBottom:6}}>{c.l}</div>
+            <div style={{fontSize:26,fontWeight:600,color:c.c,lineHeight:1}}>{c.v}</div>
           </div>
         ))}
       </div>
 
+      {/* BREAKDOWNS */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:14}}>
+        {[["Shipping Model",Object.entries(MODEL_COLORS),metrics.byModel],["Status",Object.entries(STATUS_COLORS),metrics.byStatus]].map(([title,pairs,map])=>(
+          <div key={title} style={{background:V.bg,border:`0.5px solid ${V.border}`,borderRadius:12,padding:16}}>
+            <div style={{fontSize:13,fontWeight:600,marginBottom:16,color:V.text}}>{title}</div>
+            {pairs.map(([k,c])=>{
+              const v=map[k]||0;
+              const pct=total>0?Math.round(v/total*100):0;
+              return(
+                <div key={k} style={{marginBottom:12}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
+                    <span style={{fontSize:12,color:V.text,display:"flex",alignItems:"center",gap:7}}>
+                      <span style={{width:9,height:9,borderRadius:2,background:c,flexShrink:0,display:"inline-block"}}/>
+                      {k}
+                    </span>
+                    <span style={{fontSize:12,color:V.text2}}>{v}&nbsp;<span style={{fontWeight:600,color:V.text}}>{pct}%</span></span>
+                  </div>
+                  <div style={{height:6,background:V.bg3,borderRadius:999,overflow:"hidden"}}>
+                    <div style={{height:"100%",width:`${pct}%`,background:c,borderRadius:999}}/>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+
+      {/* TREND CHART */}
       <div style={{background:V.bg,border:`0.5px solid ${V.border}`,borderRadius:12,padding:16,marginBottom:14}}>
-        <div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}>
-          <div style={{fontSize:13,fontWeight:600}}>Trend chart ({dateField})</div>
-          <div style={{fontSize:11,color:V.text2}}>Monthly shipment flow</div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+          <div>
+            <div style={{fontSize:13,fontWeight:600,color:V.text}}>Monthly Shipments</div>
+            <div style={{fontSize:11,color:V.text2,marginTop:3}}>Count by {dateField} · {months.length} month{months.length!==1?"s":""} shown</div>
+          </div>
         </div>
-        <div style={{display:"flex",alignItems:"flex-end",gap:6,height:120,overflowX:"auto",paddingBottom:8}}>
-          {months.map(m=>(
-            <div key={m} style={{display:"flex",flexDirection:"column",alignItems:"center",minWidth:40}}>
-              <div style={{fontSize:10,color:V.text2,marginBottom:4}}>{metrics.byMonth[m]}</div>
-              <div style={{width:30,height:`${Math.max(8,Math.round(metrics.byMonth[m]/maxM*88))}px`,background:"linear-gradient(180deg,#38bdf8,#0ea5e9)",borderRadius:"8px 8px 3px 3px",boxShadow:"0 6px 14px rgba(14,165,233,.25)"}}/>
-              <div style={{fontSize:9,color:V.text2,marginTop:6}}>{m.slice(5)}/{m.slice(2,4)}</div>
-            </div>
-          ))}
-          {months.length===0&&<div style={{fontSize:12,color:V.text2}}>No dates in selected range.</div>}
+        <div style={{display:"flex",alignItems:"flex-end",gap:6,height:160,overflowX:"auto",paddingBottom:4}}>
+          {months.map(m=>{
+            const count=metrics.byMonth[m];
+            const barH=Math.max(12,Math.round(count/maxM*130));
+            const label=new Date(m+"-02").toLocaleDateString("en-US",{month:"short",year:"2-digit"});
+            return(
+              <div key={m} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:5,minWidth:46,flexShrink:0}}>
+                <span style={{fontSize:11,fontWeight:600,color:V.text2}}>{count}</span>
+                <div style={{width:34,height:`${barH}px`,background:"linear-gradient(180deg,#38bdf8,#0284c7)",borderRadius:"6px 6px 2px 2px",flexShrink:0}}/>
+                <span style={{fontSize:10,color:V.text2,whiteSpace:"nowrap"}}>{label}</span>
+              </div>
+            );
+          })}
+          {months.length===0&&<div style={{fontSize:12,color:V.text2,alignSelf:"center"}}>No data in selected range.</div>}
         </div>
       </div>
 
+      {/* TOP CUSTOMERS + AGENTS */}
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:14}}>
         <div style={{background:V.bg,border:`0.5px solid ${V.border}`,borderRadius:12,padding:16}}>
-          <div style={{fontSize:13,fontWeight:600,marginBottom:10}}>Top customers</div>
-          {topCustomers.map(([k,v])=><RowBar key={k} label={k} value={v} max={topCustomers[0]?.[1]||1} color="#f97316"/>) }
-          {topCustomers.length===0&&<div style={{fontSize:12,color:V.text2}}>No customer data.</div>}
-          <div style={{fontSize:13,fontWeight:600,margin:"14px 0 10px"}}>Top agents</div>
-          {topAgents.map(([k,v])=><RowBar key={k} label={k} value={v} max={topAgents[0]?.[1]||1} color="#14b8a6"/>) }
-          {topAgents.length===0&&<div style={{fontSize:12,color:V.text2}}>No agent data.</div>}
+          <div style={{fontSize:13,fontWeight:600,marginBottom:14,color:V.text}}>Top Customers</div>
+          {topCustomers.map(([k,v])=><RowBar key={k} label={k} value={v} max={topCustomers[0]?.[1]||1} color="#f97316"/>)}
+          {topCustomers.length===0&&<div style={{fontSize:12,color:V.text2}}>No data.</div>}
         </div>
-
         <div style={{background:V.bg,border:`0.5px solid ${V.border}`,borderRadius:12,padding:16}}>
-          <div style={{fontSize:13,fontWeight:600,marginBottom:10}}>Insights from filtered data</div>
-          <div style={{display:"grid",gap:8}}>
-            {insightCards.map(i=>(
-              <div key={i.title} style={{border:`1px solid ${i.color}33`,borderLeft:`4px solid ${i.color}`,borderRadius:10,padding:"10px 12px",background:`${i.color}10`}}>
-                <div style={{fontSize:11,color:V.text2,marginBottom:2}}>{i.title}</div>
-                <div style={{fontSize:20,fontWeight:700,color:i.color}}>{i.value}</div>
-                <div style={{fontSize:11,color:V.text2}}>{i.note}</div>
-              </div>
+          <div style={{fontSize:13,fontWeight:600,marginBottom:14,color:V.text}}>Top Agents</div>
+          {topAgents.map(([k,v])=><RowBar key={k} label={k} value={v} max={topAgents[0]?.[1]||1} color="#14b8a6"/>)}
+          {topAgents.length===0&&<div style={{fontSize:12,color:V.text2}}>No data.</div>}
+        </div>
+      </div>
+
+      {/* FINANCIAL INSIGHTS + RATE ASSUMPTIONS */}
+      <div style={{display:"grid",gridTemplateColumns:"2fr 1fr",gap:14,marginBottom:14}}>
+        <div style={{background:V.bg,border:`0.5px solid ${V.border}`,borderRadius:12,padding:16}}>
+          <div style={{fontSize:13,fontWeight:600,marginBottom:14,color:V.text}}>Financial Insights</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+            {insightCards.map((ic,idx)=>{
+              const fullWidth=idx===insightCards.length-1&&insightCards.length%2===1;
+              return(
+                <div key={ic.title} style={{border:`0.5px solid ${ic.color}28`,borderLeft:`3px solid ${ic.color}`,borderRadius:9,padding:"12px 14px",background:`${ic.color}07`,...(fullWidth?{gridColumn:"1 / -1"}:{})}}>
+                  <div style={{fontSize:10,fontWeight:600,color:V.text2,textTransform:"uppercase",letterSpacing:".05em",marginBottom:5}}>{ic.title}</div>
+                  <div style={{fontSize:24,fontWeight:700,color:ic.color,lineHeight:1,marginBottom:4}}>{ic.value}</div>
+                  <div style={{fontSize:11,color:V.text2}}>{ic.note}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+        <div style={{background:V.bg,border:`0.5px solid ${V.border}`,borderRadius:12,padding:16}}>
+          <div style={{fontSize:13,fontWeight:600,color:V.text,marginBottom:4}}>Rate Assumptions</div>
+          <div style={{fontSize:11,color:V.text2,marginBottom:14}}>Applied to estimated cost calculations only</div>
+          <div style={{display:"flex",flexDirection:"column",gap:12}}>
+            {[["Freight / CBM ($)",freightPerCbm,setFreightPerCbm],["Import Duty (%)",dutyPct,setDutyPct],["Delay Cost ($/day)",delayCostPerDay,setDelayCostPerDay]].map(([label,val,setter])=>(
+              <label key={label} style={{display:"flex",flexDirection:"column",gap:4}}>
+                <span style={{fontSize:10,fontWeight:600,color:V.text2,textTransform:"uppercase",letterSpacing:".05em"}}>{label}</span>
+                <input type="number" value={val} onChange={e=>setter(e.target.value)} style={{...sel,width:"100%"}}/>
+              </label>
             ))}
-            <div style={{fontSize:11,color:V.text2,marginTop:2}}>Tip: tighten date range + model filters to perform customer-specific profitability review.</div>
           </div>
         </div>
       </div>
 
+      {/* PRODUCT TABLE */}
       <div style={{background:V.bg,border:`0.5px solid ${V.border}`,borderRadius:12,overflow:"hidden"}}>
-        <div style={{padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",borderBottom:`0.5px solid ${V.border}`,background:V.bg2}}>
-          <div style={{fontSize:13,fontWeight:600}}>Product-level analytics table</div>
-          <label style={{fontSize:11,color:V.text2}}>Rows
-            <select value={topCount} onChange={e=>setTopCount(Number(e.target.value))} style={{...sel,marginLeft:6,padding:"3px 8px"}}>{[5,8,12,20].map(n=><option key={n} value={n}>{n}</option>)}</select>
+        <div style={{padding:"14px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",borderBottom:`0.5px solid ${V.border}`,background:V.bg2}}>
+          <div>
+            <div style={{fontSize:13,fontWeight:600,color:V.text}}>Product Breakdown</div>
+            <div style={{fontSize:11,color:V.text2,marginTop:3}}>{metrics.productRows.length} product{metrics.productRows.length!==1?"s":""} across filtered shipments</div>
+          </div>
+          <label style={{fontSize:11,color:V.text2,display:"flex",alignItems:"center",gap:6}}>
+            Show
+            <select value={topCount} onChange={e=>setTopCount(Number(e.target.value))} style={{...sel,padding:"4px 8px"}}>{[5,8,12,20].map(n=><option key={n} value={n}>{n}</option>)}</select>
+            rows
           </label>
         </div>
         <div style={{overflowX:"auto"}}>
-          <table style={{width:"100%",borderCollapse:"collapse",minWidth:780}}>
+          <table style={{width:"100%",borderCollapse:"collapse",minWidth:800}}>
             <thead>
-              <tr style={{background:V.bg2,fontSize:11,color:V.text2}}>
-                {["SKU / Product","Qty","Shipments","Customers","Cost/Unit","Product Cost","Est. Freight","Contribution"].map(h=><th key={h} style={{textAlign:"left",padding:"8px 12px",borderBottom:`0.5px solid ${V.border}`,fontWeight:600}}>{h}</th>)}
+              <tr style={{background:V.bg2,fontSize:10,color:V.text2,textTransform:"uppercase",letterSpacing:".05em"}}>
+                {["SKU / Product","Qty","Shipments","Customers","Cost / Unit","Product Cost","Est. Freight","% of Units"].map(h=>(
+                  <th key={h} style={{textAlign:"left",padding:"10px 14px",borderBottom:`0.5px solid ${V.border}`,fontWeight:600,whiteSpace:"nowrap"}}>{h}</th>
+                ))}
               </tr>
             </thead>
             <tbody>
               {topProducts.map((r,i)=>{
                 const pct=metrics.totals.skuQty?Math.round(r.qty/metrics.totals.skuQty*100):0;
                 return(
-                  <tr key={r.sku} style={{fontSize:12,background:i%2===0?V.bg:"rgba(2,6,23,.02)",borderBottom:`0.5px solid ${V.border}`}}>
-                    <td style={{padding:"8px 12px",fontWeight:500}}>{r.sku}</td>
-                    <td style={{padding:"8px 12px"}}>{Math.round(r.qty).toLocaleString()} {r.unit}</td>
-                    <td style={{padding:"8px 12px"}}>{r.shipments}</td>
-                    <td style={{padding:"8px 12px"}}>{r.customers}</td>
-                    <td style={{padding:"8px 12px",color:r.costPerUnit>0?V.text:V.text2}}>{r.costPerUnit>0?`$${Number(r.costPerUnit).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}`:"—"}</td>
-                    <td style={{padding:"8px 12px",fontWeight:r.productCost>0?600:400,color:r.productCost>0?"#059669":V.text2}}>{r.productCost>0?`$${Math.round(r.productCost).toLocaleString()}`:"—"}</td>
-                    <td style={{padding:"8px 12px",color:V.text2}}>${Math.round(r.estFreight).toLocaleString()}</td>
-                    <td style={{padding:"8px 12px"}}><span style={{padding:"2px 8px",borderRadius:999,background:"#e0f2fe",color:"#0369a1",fontSize:11,fontWeight:600}}>{pct}%</span></td>
+                  <tr key={r.sku} style={{fontSize:12,background:i%2===0?V.bg:"rgba(0,0,0,.012)",borderBottom:`0.5px solid ${V.border}`}}>
+                    <td style={{padding:"10px 14px",fontWeight:500,color:V.text}}>{r.sku}</td>
+                    <td style={{padding:"10px 14px",color:V.text2}}>{Math.round(r.qty).toLocaleString()} <span style={{fontSize:10}}>{r.unit}</span></td>
+                    <td style={{padding:"10px 14px",color:V.text2,textAlign:"center"}}>{r.shipments}</td>
+                    <td style={{padding:"10px 14px",color:V.text2,textAlign:"center"}}>{r.customers}</td>
+                    <td style={{padding:"10px 14px",color:r.costPerUnit>0?V.text:V.text2}}>{r.costPerUnit>0?`$${Number(r.costPerUnit).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}`:"—"}</td>
+                    <td style={{padding:"10px 14px",fontWeight:r.productCost>0?600:400,color:r.productCost>0?"#059669":V.text2}}>{r.productCost>0?`$${Math.round(r.productCost).toLocaleString()}`:"—"}</td>
+                    <td style={{padding:"10px 14px",color:V.text2}}>${Math.round(r.estFreight).toLocaleString()}</td>
+                    <td style={{padding:"10px 14px"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:8}}>
+                        <div style={{flex:1,height:5,background:V.bg3,borderRadius:999,overflow:"hidden",minWidth:50}}>
+                          <div style={{height:"100%",width:`${pct}%`,background:"#0ea5e9",borderRadius:999}}/>
+                        </div>
+                        <span style={{fontSize:11,fontWeight:600,color:"#0369a1",minWidth:28,textAlign:"right"}}>{pct}%</span>
+                      </div>
+                    </td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
         </div>
-        {topProducts.length===0&&<div style={{padding:22,textAlign:"center",fontSize:12,color:V.text2}}>No SKU rows found for current filter selection.</div>}
+        {topProducts.length===0&&<div style={{padding:32,textAlign:"center",fontSize:12,color:V.text2}}>No products found for current filter selection.</div>}
       </div>
     </div>
   );
@@ -1020,10 +1093,14 @@ function Analytics({data,itemSetup}){
 function RowBar({label,value,max,color}){
   const pct=Math.round((value/(max||1))*100);
   return(
-    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
-      <div style={{fontSize:12,color:V.text2,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{label}</div>
-      <div style={{fontSize:12,fontWeight:600,width:24,textAlign:"right"}}>{value}</div>
-      <div style={{width:90,height:8,background:V.bg2,borderRadius:999,overflow:"hidden"}}><div style={{height:"100%",width:`${pct}%`,background:color}}/></div>
+    <div style={{marginBottom:12}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:4}}>
+        <div style={{fontSize:12,color:V.text,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1,marginRight:8}}>{label}</div>
+        <div style={{fontSize:12,fontWeight:700,color:V.text,whiteSpace:"nowrap"}}>{value}</div>
+      </div>
+      <div style={{width:"100%",height:6,background:V.bg2,borderRadius:999,overflow:"hidden"}}>
+        <div style={{height:"100%",width:`${pct}%`,background:color,borderRadius:999,transition:"width 0.3s ease"}}/>
+      </div>
     </div>
   );
 }
