@@ -9,14 +9,22 @@
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <style>
   *{box-sizing:border-box;margin:0;padding:0;}
-  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f1f5f9;color:#1e293b;}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Inter','Segoe UI',system-ui,sans-serif;background:#e8ecf3;color:#0f172a;}
   input,select,textarea{font-family:inherit;outline:none;}
-  input:focus,select:focus{border-color:#b45309!important;}
+  input:focus,select:focus,textarea:focus{border-color:#3b82f6!important;box-shadow:0 0 0 3px rgba(59,130,246,0.1)!important;}
   button{font-family:inherit;}
-  ::-webkit-scrollbar{width:6px;height:6px;}
+  ::-webkit-scrollbar{width:5px;height:5px;}
   ::-webkit-scrollbar-track{background:transparent;}
-  ::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:3px;}
-  .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:flex-start;justify-content:center;z-index:999;padding-top:40px;overflow:auto;}
+  ::-webkit-scrollbar-thumb{background:#c1cad6;border-radius:10px;}
+  ::-webkit-scrollbar-thumb:hover{background:#94a3b8;}
+  .modal-overlay{position:fixed;inset:0;background:rgba(8,16,36,0.7);backdrop-filter:blur(8px);display:flex;align-items:flex-start;justify-content:center;z-index:999;padding-top:32px;overflow:auto;}
+  .nav-item:hover{background:rgba(255,255,255,0.08)!important;color:#e2e8f0!important;}
+  .tbl-row:hover > td{background:rgba(37,99,235,0.035)!important;}
+  .kpi-card{transition:box-shadow 0.18s,transform 0.18s;}
+  .kpi-card:hover{box-shadow:0 8px 32px rgba(15,23,42,0.14)!important;transform:translateY(-2px);}
+  .stat-card:hover{box-shadow:0 6px 24px rgba(15,23,42,0.12)!important;}
+  .arrival-card{transition:box-shadow 0.15s,transform 0.15s;}
+  .arrival-card:hover{box-shadow:0 6px 20px rgba(15,23,42,0.12)!important;transform:translateY(-1px);}
 </style>
 </head>
 <body>
@@ -31,7 +39,7 @@ const APP_PIN = "1234"; // Must match PIN in Apps Script
 
 // ─── CONSTANTS ────────────────────────────────────────────
 const STATUSES = ["PO Placed","In Production","Ready to Ship","In Transit","Arrived","Delivered"];
-const STATUS_COLORS = {"PO Placed":"#6b7280","In Production":"#b45309","Ready to Ship":"#0284c7","In Transit":"#7c3aed","Arrived":"#065f46","Delivered":"#374151"};
+const STATUS_COLORS = {"PO Placed":"#6366f1","In Production":"#f59e0b","Ready to Ship":"#0ea5e9","In Transit":"#8b5cf6","Arrived":"#10b981","Delivered":"#64748b"};
 const MODEL_COLORS = {"Direct to Client":"#b45309","US Warehouse":"#0e7490","Port Pickup":"#7c3aed"};
 const LANE_DAYS = {east:55,west:30,gulf:40,default:45};
 const WAREHOUSE_LOCATIONS=["Unitrans - PA","Unitrans - MA","RJW - TX","RJW - PA","Direct to Client","Other"];
@@ -46,9 +54,9 @@ const DEFAULT_LOCS=[
 ];
 
 const V = {
-  bg:"#ffffff", bg2:"#f8fafc", bg3:"#f1f5f9",
-  border:"rgba(0,0,0,.1)", border2:"rgba(0,0,0,.18)",
-  text:"#1e293b", text2:"#64748b", slate:"#334155"
+  bg:"#ffffff", bg2:"#f8fafc", bg3:"#eef1f7",
+  border:"rgba(15,23,42,0.08)", border2:"rgba(15,23,42,0.16)",
+  text:"#0f172a", text2:"#64748b", slate:"#0d1628"
 };
 
 // ─── UTILS ────────────────────────────────────────────────
@@ -106,14 +114,19 @@ function PinScreen({onAuth}){
   const [err,setErr]=useState(false);
   function submit(e){e.preventDefault();if(pin===APP_PIN){localStorage.setItem("lqc_auth","1");onAuth();}else{setErr(true);setPin("");}}
   return(
-    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:V.slate}}>
-      <div style={{background:V.bg,borderRadius:16,padding:"40px 48px",minWidth:320,textAlign:"center",boxShadow:"0 20px 60px rgba(0,0,0,.3)"}}>
-        <div style={{fontSize:13,fontWeight:500,color:V.text2,letterSpacing:".1em",textTransform:"uppercase",marginBottom:4}}>LQC Logistics</div>
-        <div style={{fontSize:22,fontWeight:600,color:V.text,marginBottom:32}}>Shipping Tracker</div>
+    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"linear-gradient(135deg,#08101f 0%,#0d1628 55%,#111d30 100%)"}}>
+      <div style={{background:"rgba(255,255,255,0.04)",backdropFilter:"blur(28px)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:22,padding:"52px 56px",minWidth:380,textAlign:"center",boxShadow:"0 40px 100px rgba(0,0,0,0.6)"}}>
+        <div style={{width:52,height:52,background:"linear-gradient(135deg,#b45309,#f59e0b)",borderRadius:16,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 22px",boxShadow:"0 6px 24px rgba(180,83,9,0.5)"}}>
+          <span style={{fontSize:24,fontWeight:900,color:"#fff",fontFamily:"Georgia,serif"}}>L</span>
+        </div>
+        <div style={{fontSize:11,fontWeight:700,color:"#3d5070",letterSpacing:".16em",textTransform:"uppercase",marginBottom:8}}>LQC Logistics</div>
+        <div style={{fontSize:26,fontWeight:700,color:"#f1f5f9",marginBottom:6,letterSpacing:"-0.02em"}}>Shipping Command</div>
+        <div style={{fontSize:12,color:"#3d5070",marginBottom:36}}>Enter your team PIN to continue</div>
         <form onSubmit={submit}>
-          <input type="password" value={pin} onChange={e=>{setPin(e.target.value);setErr(false);}} placeholder="Enter PIN" maxLength={8} style={{width:"100%",fontSize:20,padding:"12px 16px",border:`1px solid ${err?"#dc2626":V.border2}`,borderRadius:8,textAlign:"center",letterSpacing:"0.3em",marginBottom:12,background:V.bg,color:V.text}}/>
-          {err&&<div style={{fontSize:12,color:"#dc2626",marginBottom:12}}>Incorrect PIN. Try again.</div>}
-          <button type="submit" style={{width:"100%",padding:"12px",background:"#b45309",color:"#fff",border:"none",borderRadius:8,fontSize:15,fontWeight:500,cursor:"pointer"}}>Unlock</button>
+          <input type="password" value={pin} onChange={e=>{setPin(e.target.value);setErr(false);}} placeholder="· · · · · · · ·" maxLength={8}
+            style={{width:"100%",fontSize:24,padding:"14px 18px",border:`1px solid ${err?"#f87171":"rgba(255,255,255,0.1)"}`,borderRadius:12,textAlign:"center",letterSpacing:"0.45em",marginBottom:12,background:"rgba(255,255,255,0.05)",color:"#f1f5f9"}}/>
+          {err&&<div style={{fontSize:12,color:"#f87171",marginBottom:12,fontWeight:500}}>Incorrect PIN. Try again.</div>}
+          <button type="submit" style={{width:"100%",padding:"14px",background:"linear-gradient(135deg,#b45309,#d97706)",color:"#fff",border:"none",borderRadius:12,fontSize:14,fontWeight:600,cursor:"pointer",letterSpacing:"0.03em",boxShadow:"0 4px 20px rgba(180,83,9,0.45)"}}>Unlock Dashboard</button>
         </form>
       </div>
     </div>
@@ -231,44 +244,82 @@ function App(){
   return(
     <div style={{display:"flex",minHeight:"100vh",fontFamily:"inherit",background:V.bg3,color:V.text}}>
       {/* Sidebar */}
-      <div style={{width:196,background:V.slate,display:"flex",flexDirection:"column",flexShrink:0,position:"sticky",top:0,height:"100vh",overflowY:"auto"}}>
-        <div style={{padding:"18px 14px 10px",borderBottom:"1px solid rgba(255,255,255,.1)"}}>
-          <div style={{fontSize:10,fontWeight:500,color:"#94a3b8",letterSpacing:".08em",textTransform:"uppercase",marginBottom:3}}>LQC Logistics</div>
-          <div style={{fontSize:14,fontWeight:500,color:"#f8fafc"}}>Shipping Tracker</div>
-          {lastSync&&<div style={{fontSize:9,color:"#64748b",marginTop:3}}>Synced {lastSync.toLocaleTimeString()}</div>}
+      <div style={{width:220,background:V.slate,display:"flex",flexDirection:"column",flexShrink:0,position:"sticky",top:0,height:"100vh",overflowY:"auto",borderRight:"1px solid rgba(255,255,255,0.04)"}}>
+        {/* Brand */}
+        <div style={{padding:"22px 16px 18px",borderBottom:"1px solid rgba(255,255,255,0.06)"}}>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
+            <div style={{width:36,height:36,background:"linear-gradient(135deg,#b45309,#f59e0b)",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,boxShadow:"0 3px 10px rgba(180,83,9,0.45)"}}>
+              <span style={{fontSize:17,fontWeight:900,color:"#fff",fontFamily:"Georgia,serif",letterSpacing:"-0.03em"}}>L</span>
+            </div>
+            <div>
+              <div style={{fontSize:12,fontWeight:700,color:"#f1f5f9",letterSpacing:"0.01em",lineHeight:1.3}}>LQC Logistics</div>
+              <div style={{fontSize:10,color:"#3d5070",marginTop:1}}>Shipping Command</div>
+            </div>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:5,fontSize:10}}>
+            <span style={{width:5,height:5,background:syncErr?"#f87171":"#10b981",borderRadius:"50%",display:"inline-block",flexShrink:0}}/>
+            <span style={{color:syncErr?"#f87171":"#3d5070"}}>{syncErr?"Sync error":(lastSync?"Live · "+lastSync.toLocaleTimeString("en-US",{hour:"2-digit",minute:"2-digit"}):"Connecting…")}</span>
+          </div>
         </div>
-        <div style={{padding:"8px 14px",borderBottom:"1px solid rgba(255,255,255,.1)"}}>
-          <button onClick={()=>setBellOpen(o=>!o)} style={{display:"flex",alignItems:"center",gap:8,background:"transparent",border:"none",cursor:"pointer",color:"#cbd5e1",fontSize:13,width:"100%",padding:0}}>
-            <span style={{fontSize:15,position:"relative"}}>
-              🔔
-              {alerts.length>0&&<span style={{position:"absolute",top:-4,right:-6,background:criticalCount>0?"#dc2626":"#b45309",color:"#fff",fontSize:9,fontWeight:700,borderRadius:8,padding:"0 4px",lineHeight:"14px"}}>{alerts.length}</span>}
+        {/* Bell */}
+        <div style={{padding:"10px 12px",borderBottom:"1px solid rgba(255,255,255,0.05)"}}>
+          <button onClick={()=>setBellOpen(o=>!o)} className="nav-item"
+            style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,width:"100%",padding:"8px 10px",border:"none",borderRadius:8,
+              background:alerts.length>0?(criticalCount>0?"rgba(239,68,68,0.12)":"rgba(245,158,11,0.1)"):"rgba(255,255,255,0.04)",
+              cursor:"pointer",color:alerts.length>0?(criticalCount>0?"#fca5a5":"#fcd34d"):"#4a6080"}}>
+            <span style={{display:"flex",alignItems:"center",gap:7,fontSize:12,fontWeight:500}}>
+              <span style={{fontSize:13}}>🔔</span> Alerts
+              {criticalCount>0&&<span style={{fontSize:10,color:"#fca5a5",fontWeight:400}}>· {criticalCount} critical</span>}
             </span>
-            <span>Alerts {criticalCount>0&&<span style={{fontSize:10,color:"#fca5a5"}}>({criticalCount} critical)</span>}</span>
+            {alerts.length>0&&<span style={{background:criticalCount>0?"#dc2626":"#d97706",color:"#fff",fontSize:10,fontWeight:700,borderRadius:10,padding:"1px 7px",lineHeight:"17px"}}>{alerts.length}</span>}
           </button>
         </div>
-        {TABS.map(t=>(
-          <button key={t} onClick={()=>{setTab(t);setBellOpen(false);}} style={{display:"block",width:"100%",textAlign:"left",padding:"9px 14px",background:tab===t?"rgba(180,87,9,.35)":"transparent",color:tab===t?"#fcd34d":"#cbd5e1",border:"none",cursor:"pointer",fontSize:13,fontWeight:tab===t?500:400,borderLeft:tab===t?"3px solid #fcd34d":"3px solid transparent"}}>
-            {t==="Alerts"?<span style={{display:"flex",alignItems:"center",gap:6}}>{t}{alerts.length>0&&<span style={{fontSize:10,background:"rgba(180,87,9,.4)",color:"#fcd34d",borderRadius:4,padding:"0 5px"}}>{alerts.length}</span>}</span>:t}
+        {/* Navigation */}
+        <nav style={{flex:1,padding:"8px 12px 8px",overflowY:"auto"}}>
+          {[
+            {label:"Operations",items:["Dashboard","Shipments","SKU Search"]},
+            {label:"Planning",items:["Timeline","Calendar","Alerts"]},
+            {label:"Intelligence",items:["Analytics"]},
+            {label:"Configuration",items:["Item Setup","Locations","Manage"]},
+          ].map(({label,items})=>(
+            <div key={label} style={{marginBottom:4}}>
+              <div style={{fontSize:9,fontWeight:700,color:"#253347",textTransform:"uppercase",letterSpacing:".1em",padding:"10px 8px 4px"}}>{label}</div>
+              {items.map(t=>{
+                const isActive=tab===t;
+                return(
+                  <button key={t} onClick={()=>{setTab(t);setBellOpen(false);}} className="nav-item"
+                    style={{display:"flex",alignItems:"center",justifyContent:"space-between",width:"100%",textAlign:"left",
+                      padding:"7px 10px",
+                      background:isActive?"rgba(96,165,250,0.13)":"transparent",
+                      color:isActive?"#93c5fd":"#4a6080",
+                      border:"none",
+                      borderLeft:isActive?"2.5px solid #60a5fa":"2.5px solid transparent",
+                      cursor:"pointer",fontSize:12.5,fontWeight:isActive?600:400,
+                      borderRadius:"0 8px 8px 0",marginBottom:1,marginLeft:-2}}>
+                    <span>{t}</span>
+                    {t==="Alerts"&&alerts.length>0&&<span style={{fontSize:9,background:"rgba(220,38,38,0.2)",color:"#fca5a5",borderRadius:10,padding:"1px 6px"}}>{alerts.length}</span>}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+        </nav>
+        {/* Footer */}
+        <div style={{padding:"12px 12px",borderTop:"1px solid rgba(255,255,255,0.05)"}}>
+          <button onClick={loadData} disabled={loading||syncing} className="nav-item"
+            style={{fontSize:11,padding:"7px 10px",border:"1px solid rgba(255,255,255,0.07)",borderRadius:8,background:"transparent",cursor:"pointer",color:"#3d5070",width:"100%",marginBottom:8,textAlign:"left"}}>
+            {loading?"Loading…":syncing?"Saving…":"↻  Refresh data"}
           </button>
-        ))}
-        <div style={{flex:1}}/>
-        <div style={{padding:"8px 14px",borderBottom:"1px solid rgba(255,255,255,.1)"}}>
-          <button onClick={loadData} disabled={loading||syncing} style={{fontSize:11,padding:"5px 10px",border:"0.5px solid rgba(255,255,255,.2)",borderRadius:4,background:"transparent",cursor:"pointer",color:"#94a3b8",width:"100%"}}>
-            {loading?"Loading…":syncing?"Saving…":"↻ Refresh"}
-          </button>
-        </div>
-        <div style={{padding:"6px 14px",fontSize:10,color:"#64748b"}}>
-          {data.length} shipments
-          {syncErr&&<div style={{color:"#f87171",marginTop:2}}>⚠ Sync error</div>}
-        </div>
-        <div style={{padding:"8px 14px"}}>
-          <button onClick={()=>{localStorage.removeItem("lqc_auth");setAuthed(false);}} style={{fontSize:11,padding:"4px 0",background:"transparent",border:"none",cursor:"pointer",color:"#64748b",width:"100%",textAlign:"left"}}>Sign out</button>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <span style={{fontSize:10,color:"#253347"}}>{data.length} shipments</span>
+            <button onClick={()=>{localStorage.removeItem("lqc_auth");setAuthed(false);}} style={{fontSize:10,background:"transparent",border:"none",cursor:"pointer",color:"#253347",padding:0}}>Sign out</button>
+          </div>
         </div>
       </div>
 
       {/* Bell dropdown */}
       {bellOpen&&(
-        <div style={{position:"fixed",left:196,top:0,width:370,maxHeight:480,overflowY:"auto",background:V.bg,border:`0.5px solid ${V.border2}`,borderRadius:"0 0 12px 12px",zIndex:200,boxShadow:"0 8px 24px rgba(0,0,0,.15)"}}>
+        <div style={{position:"fixed",left:220,top:0,width:380,maxHeight:500,overflowY:"auto",background:V.bg,border:`1px solid ${V.border}`,borderRadius:"0 0 14px 14px",zIndex:200,boxShadow:"0 12px 40px rgba(15,23,42,0.18)"}}>
           <div style={{padding:"10px 14px",borderBottom:`0.5px solid ${V.border}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
             <span style={{fontSize:13,fontWeight:500}}>Active alerts ({alerts.length})</span>
             <div style={{display:"flex",gap:8}}>
@@ -310,16 +361,24 @@ function App(){
       </div>
 
       {editRow&&<EditModal row={editRow} onSave={async(r)=>{await saveRow(r);setEditRow(null);}} onClose={()=>setEditRow(null)} syncing={syncing} skuCatalog={skuCatalog} itemSetup={itemSetup} locations={locations}/>}
-      {syncing&&<div style={{position:"fixed",bottom:16,right:16,background:"#b45309",color:"#fff",fontSize:12,padding:"6px 14px",borderRadius:20,fontWeight:500,zIndex:9999}}>Saving to Google Sheet…</div>}
+      {syncing&&<div style={{position:"fixed",bottom:20,right:20,background:"#0f172a",color:"#f1f5f9",fontSize:12,padding:"10px 18px",borderRadius:12,fontWeight:500,zIndex:9999,boxShadow:"0 6px 24px rgba(0,0,0,.3)",display:"flex",alignItems:"center",gap:9,border:"1px solid rgba(255,255,255,0.07)"}}>
+        <span style={{width:7,height:7,background:"#f59e0b",borderRadius:"50%",display:"inline-block",flexShrink:0}}/>
+        Saving to Google Sheet…
+      </div>}
     </div>
   );
 }
 
 function LoadingScreen(){
   return(
-    <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",flexDirection:"column",gap:12,color:V.text2}}>
-      <div style={{fontSize:32}}>⛵</div>
-      <div style={{fontSize:14}}>Loading shipments from Google Sheet…</div>
+    <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",flexDirection:"column",gap:16,color:V.text2}}>
+      <div style={{width:52,height:52,background:"linear-gradient(135deg,#b45309,#f59e0b)",borderRadius:16,display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 4px 20px rgba(180,83,9,0.3)"}}>
+        <span style={{fontSize:24,fontWeight:900,color:"#fff",fontFamily:"Georgia,serif"}}>L</span>
+      </div>
+      <div>
+        <div style={{fontSize:14,fontWeight:600,color:V.text,marginBottom:4,textAlign:"center"}}>Loading shipment data</div>
+        <div style={{fontSize:12,color:V.text2,textAlign:"center"}}>Syncing from Google Sheet…</div>
+      </div>
     </div>
   );
 }
@@ -353,25 +412,25 @@ function Dashboard({data,alerts,setTab,itemSetup,setEditRow}){
   ];
   return(
     <div style={{padding:24}}>
-      <div style={{marginBottom:22}}>
-        <div style={{fontSize:22,fontWeight:700,color:V.text,letterSpacing:"-0.02em"}}>Operations Dashboard</div>
-        <div style={{fontSize:12,color:V.text2,marginTop:4}}>{data.length} total shipments · {active.length} active</div>
+      <div style={{marginBottom:24}}>
+        <div style={{fontSize:11,fontWeight:700,color:V.text2,textTransform:"uppercase",letterSpacing:".1em",marginBottom:5}}>Operations</div>
+        <div style={{fontSize:26,fontWeight:800,color:V.text,letterSpacing:"-0.03em",lineHeight:1}}>Dashboard</div>
+        <div style={{fontSize:12,color:V.text2,marginTop:6}}>{data.length} total shipments · {active.length} active · {data.filter(r=>r["Status"]==="Delivered").length} delivered</div>
       </div>
       {/* KPI CARDS */}
       <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:12,marginBottom:20}}>
         {cards.map(c=>{
           const isOpen=drill===c.key;
           return(
-            <div key={c.key} onClick={()=>setDrill(isOpen?null:c.key)}
-              style={{background:V.bg,borderRadius:14,padding:"16px 18px",cursor:"pointer",position:"relative",overflow:"hidden",
+            <div key={c.key} onClick={()=>setDrill(isOpen?null:c.key)} className="kpi-card"
+              style={{background:V.bg,borderRadius:16,padding:"20px 20px 18px",cursor:"pointer",position:"relative",overflow:"hidden",
                 border:isOpen?`1.5px solid ${c.color}`:`1px solid ${V.border}`,
-                boxShadow:isOpen?`0 0 0 4px ${c.color}18,0 6px 24px ${c.color}14`:"0 1px 4px rgba(0,0,0,.07),0 2px 10px rgba(0,0,0,.04)",
-                transition:"box-shadow 0.15s,border-color 0.15s"}}>
-              <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:c.color,borderRadius:"14px 14px 0 0"}}/>
-              <div style={{fontSize:10,fontWeight:700,color:V.text2,textTransform:"uppercase",letterSpacing:".07em",marginBottom:10}}>{c.label}</div>
-              <div style={{fontSize:32,fontWeight:800,color:c.color,lineHeight:1,marginBottom:6,letterSpacing:"-0.02em"}}>{c.value}</div>
+                boxShadow:isOpen?`0 0 0 4px ${c.color}18,0 8px 32px rgba(15,23,42,0.1)`:"0 1px 3px rgba(15,23,42,0.08),0 4px 16px rgba(15,23,42,0.04)"}}>
+              <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:c.color,borderRadius:"16px 16px 0 0",opacity:isOpen?1:0.65}}/>
+              <div style={{fontSize:9,fontWeight:700,color:V.text2,textTransform:"uppercase",letterSpacing:".1em",marginBottom:14}}>{c.label}</div>
+              <div style={{fontSize:34,fontWeight:800,color:isOpen?c.color:V.text,lineHeight:1,marginBottom:8,letterSpacing:"-0.03em"}}>{c.value}</div>
               <div style={{fontSize:11,color:V.text2}}>{c.sub}</div>
-              <div style={{position:"absolute",bottom:12,right:14,fontSize:11,color:c.color,fontWeight:700,opacity:0.7}}>{isOpen?"▲":"▼"}</div>
+              {isOpen&&<div style={{position:"absolute",bottom:12,right:14,fontSize:10,color:c.color,fontWeight:700}}>▲ close</div>}
             </div>
           );
         })}
@@ -384,12 +443,12 @@ function Dashboard({data,alerts,setTab,itemSetup,setEditRow}){
       )}
       {/* FINANCIAL SNAPSHOT */}
       <div style={{marginBottom:20}}>
-        <div style={{fontSize:10,fontWeight:700,color:V.text2,textTransform:"uppercase",letterSpacing:".08em",marginBottom:10}}>Financial Snapshot — Active Orders Only</div>
+        <div style={{fontSize:9,fontWeight:700,color:V.text2,textTransform:"uppercase",letterSpacing:".1em",marginBottom:12}}>Financial Snapshot — Active Orders</div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12}}>
-          {[{l:"Product Cost",v:fmt$(fin.productCost),c:"#059669",n:`Across ${active.length} active orders`},{l:"Container Cost",v:fmt$(fin.containerCost),c:"#f97316",n:"Direct container costs"},{l:"Drayage",v:fmt$(fin.drayage),c:"#7c3aed",n:"Port-to-warehouse"},{l:"Total In-Flight",v:fmt$(fin.total),c:"#0e7490",n:"All cost components"}].map(f=>(
-            <div key={f.l} style={{background:V.bg,border:`1px solid ${V.border}`,borderRadius:12,padding:"14px 16px",boxShadow:"0 1px 6px rgba(0,0,0,.06)",borderTop:`3px solid ${f.c}`}}>
-              <div style={{fontSize:10,fontWeight:700,color:f.c,textTransform:"uppercase",letterSpacing:".06em",marginBottom:7}}>{f.l}</div>
-              <div style={{fontSize:22,fontWeight:700,color:V.text,marginBottom:3}}>{f.v}</div>
+          {[{l:"Product Cost",v:fmt$(fin.productCost),c:"#10b981",n:`${active.length} active orders`},{l:"Container Cost",v:fmt$(fin.containerCost),c:"#f97316",n:"Direct freight"},{l:"Drayage",v:fmt$(fin.drayage),c:"#8b5cf6",n:"Port to warehouse"},{l:"Total In-Flight",v:fmt$(fin.total),c:"#3b82f6",n:"All cost components"}].map(f=>(
+            <div key={f.l} className="stat-card" style={{background:V.bg,border:`1px solid ${V.border}`,borderRadius:14,padding:"16px 18px",boxShadow:"0 1px 4px rgba(15,23,42,0.07)",borderTop:`3px solid ${f.c}`,transition:"box-shadow 0.15s"}}>
+              <div style={{fontSize:9,fontWeight:700,color:f.c,textTransform:"uppercase",letterSpacing:".1em",marginBottom:10}}>{f.l}</div>
+              <div style={{fontSize:24,fontWeight:700,color:V.text,marginBottom:4,letterSpacing:"-0.02em"}}>{f.v}</div>
               <div style={{fontSize:11,color:V.text2}}>{f.n}</div>
             </div>
           ))}
@@ -397,20 +456,22 @@ function Dashboard({data,alerts,setTab,itemSetup,setEditRow}){
       </div>
       {/* ALERTS BANNER */}
       {alerts.length>0&&(
-        <div style={{background:"linear-gradient(135deg,#fef2f2,#fff7f7)",border:"1px solid #fca5a5",borderRadius:12,padding:"12px 18px",marginBottom:20,display:"flex",justifyContent:"space-between",alignItems:"center",boxShadow:"0 2px 8px rgba(220,38,38,.08)"}}>
+        <div style={{background:"#fff5f5",border:"1px solid #fecaca",borderRadius:14,padding:"14px 20px",marginBottom:20,display:"flex",justifyContent:"space-between",alignItems:"center",boxShadow:"0 2px 12px rgba(220,38,38,.07)"}}>
           <div style={{display:"flex",alignItems:"center",gap:12}}>
-            <span style={{fontSize:20}}>⛔</span>
+            <div style={{width:36,height:36,background:"#fee2e2",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+              <span style={{fontSize:16}}>⛔</span>
+            </div>
             <div>
               <div style={{fontSize:13,fontWeight:700,color:"#991b1b"}}>{crit} critical alert{crit!==1?"s":""} require attention</div>
-              <div style={{fontSize:11,color:"#b91c1c"}}>{alerts.length-crit} warning{alerts.length-crit!==1?"s":""} also active</div>
+              <div style={{fontSize:11,color:"#ef4444",marginTop:1}}>{alerts.length-crit} additional warning{alerts.length-crit!==1?"s":""} active</div>
             </div>
           </div>
-          <button onClick={()=>setTab("Alerts")} style={{fontSize:12,padding:"6px 16px",border:"1px solid #fca5a5",borderRadius:8,background:"#fff",cursor:"pointer",color:"#991b1b",fontWeight:600}}>View all →</button>
+          <button onClick={()=>setTab("Alerts")} style={{fontSize:12,padding:"7px 18px",border:"1px solid #fca5a5",borderRadius:9,background:"#ffffff",cursor:"pointer",color:"#991b1b",fontWeight:600,boxShadow:"0 1px 4px rgba(220,38,38,.1)"}}>View all →</button>
         </div>
       )}
       {/* UPCOMING ARRIVALS */}
       <div>
-        <div style={{fontSize:10,fontWeight:700,color:V.text2,textTransform:"uppercase",letterSpacing:".08em",marginBottom:10}}>Arrivals — Next 21 Days ({upcoming.length})</div>
+        <div style={{fontSize:9,fontWeight:700,color:V.text2,textTransform:"uppercase",letterSpacing:".1em",marginBottom:12}}>Arrivals — Next 21 Days ({upcoming.length})</div>
         {upcoming.length===0&&<div style={{background:V.bg,border:`1px solid ${V.border}`,borderRadius:12,padding:24,textAlign:"center",fontSize:13,color:V.text2,boxShadow:"0 1px 4px rgba(0,0,0,.05)"}}>No arrivals in the next 21 days</div>}
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(210px,1fr))",gap:10}}>
           {upcoming.map(r=>{
@@ -418,10 +479,10 @@ function Dashboard({data,alerts,setTab,itemSetup,setEditRow}){
             const urgent=d<=3;const loc=r["Landing Location"]||r["Destination"]||r["POD"]||"—";
             const isInternal=INTERNAL_LOCS.has(loc)||WAREHOUSE_LOCATIONS.slice(0,4).some(w=>loc.toLowerCase().includes(w.toLowerCase().split(" ")[0]));
             return(
-              <div key={r["LQC PO#"]} onClick={setEditRow?()=>setEditRow(r):undefined} style={{background:V.bg,borderRadius:11,padding:"12px 14px",cursor:setEditRow?"pointer":"default",
+              <div key={r["LQC PO#"]} onClick={setEditRow?()=>setEditRow(r):undefined} className="arrival-card" style={{background:V.bg,borderRadius:14,padding:"14px 16px",cursor:setEditRow?"pointer":"default",
                 border:`1px solid ${ha?"#fbbf24":urgent?"#fed7aa":V.border}`,
-                borderTop:`3px solid ${urgent?"#ef4444":d<=7?"#f97316":"#94a3b8"}`,
-                boxShadow:"0 1px 6px rgba(0,0,0,.06)"}}>
+                borderTop:`3px solid ${urgent?"#ef4444":d<=7?"#f97316":"#c8d0dc"}`,
+                boxShadow:"0 1px 4px rgba(15,23,42,0.07)"}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:5}}>
                   <div style={{fontSize:13,fontWeight:700,color:V.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1,marginRight:6}}>{r["Customer"]||"—"}{ha&&<span style={{marginLeft:4,fontSize:10,color:"#b45309"}}>⚠</span>}</div>
                   <span style={{fontSize:11,fontWeight:800,color:urgent?"#ef4444":d<=7?"#f97316":"#64748b",whiteSpace:"nowrap",flexShrink:0}}>{d===0?"Today":d===1?"Tmrw":`${d}d`}</span>
@@ -554,11 +615,15 @@ function Shipments({data,alerts,quickStatus,setEditRow,selected,toggleSelect,tog
   function toggleSort(col){if(sortCol===col)setSortDir(d=>d==="asc"?"desc":"asc");else{setSortCol(col);setSortDir("asc");}}
   const deliveredCount=sorted.filter(r=>r["Status"]==="Delivered").length;
   const displayed=(!showArchived&&fStatus==="All")?sorted.filter(r=>r["Status"]!=="Delivered"):sorted;
-  const sel={fontSize:12,padding:"5px 8px",border:`0.5px solid ${V.border2}`,borderRadius:6,background:V.bg,color:V.text};
+  const sel={fontSize:12,padding:"6px 10px",border:`1px solid ${V.border}`,borderRadius:8,background:V.bg,color:V.text};
   return(
     <div style={{padding:24}}>
-      <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap",alignItems:"center"}}>
-        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search PO, customer, SKU, container, BOL…" style={{flex:1,minWidth:180,fontSize:13,padding:"6px 10px",border:`0.5px solid ${V.border2}`,borderRadius:6,background:V.bg,color:V.text}}/>
+      <div style={{marginBottom:20}}>
+        <div style={{fontSize:9,fontWeight:700,color:V.text2,textTransform:"uppercase",letterSpacing:".1em",marginBottom:5}}>Operations</div>
+        <div style={{fontSize:26,fontWeight:800,color:V.text,letterSpacing:"-0.03em",lineHeight:1}}>Shipments</div>
+      </div>
+      <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap",alignItems:"center"}}>
+        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search PO, customer, SKU, container, BOL…" style={{flex:1,minWidth:200,fontSize:13,padding:"8px 12px",border:`1px solid ${V.border}`,borderRadius:9,background:V.bg,color:V.text,boxShadow:"0 1px 3px rgba(15,23,42,0.06)"}}/>
         <select value={fStatus} onChange={e=>setFStatus(e.target.value)} style={sel}><option>All</option>{STATUSES.map(s=><option key={s}>{s}</option>)}</select>
         <select value={fCustomer} onChange={e=>setFCustomer(e.target.value)} style={sel}>{customers.map(s=><option key={s}>{s}</option>)}</select>
         <select value={fModel} onChange={e=>setFModel(e.target.value)} style={sel}>{["All","Direct to Client","US Warehouse","Port Pickup"].map(s=><option key={s}>{s}</option>)}</select>
@@ -578,11 +643,11 @@ function Shipments({data,alerts,quickStatus,setEditRow,selected,toggleSelect,tog
           <button onClick={()=>toggleAll([])} style={{fontSize:12,padding:"4px 10px",border:"0.5px solid #93c5fd",borderRadius:4,background:"transparent",cursor:"pointer",color:"#1d4ed8"}}>Clear</button>
         </div>
       )}
-      <div style={{border:`0.5px solid ${V.border}`,borderRadius:12,overflow:"hidden",background:V.bg}}>
+      <div style={{border:`1px solid ${V.border}`,borderRadius:14,overflow:"hidden",background:V.bg,boxShadow:"0 1px 6px rgba(15,23,42,0.06)"}}>
         <div style={{overflowX:"auto"}}>
           <table style={{width:"100%",borderCollapse:"collapse",minWidth:900}}>
             <thead>
-              <tr style={{background:V.bg2,fontSize:11,color:V.text2}}>
+              <tr style={{background:V.bg3,fontSize:11,color:V.text2}}>
                 <th style={{padding:"8px 8px",width:32}}><input type="checkbox" onChange={()=>toggleAll(filtered)} checked={selected.size===filtered.length&&filtered.length>0} style={{cursor:"pointer"}}/></th>
                 {["LQC PO#","Customer","Cust. PO","ETD","ETA","Destination","Agent","Model","Status",""].map((h,i)=>{
                   const sortable=h&&SHIP_SORT_KEYS[h];
@@ -607,7 +672,7 @@ function Shipments({data,alerts,quickStatus,setEditRow,selected,toggleSelect,tog
                 const skus=Array.isArray(r["SKUs"])?r["SKUs"]:[];
                 return(
                   <React.Fragment key={po}>
-                    <tr style={{borderBottom:`0.5px solid ${V.border}`,background:isExp?V.bg2:ha?"rgba(251,191,36,.06)":i%2===0?V.bg:"rgba(0,0,0,.01)"}}>
+                    <tr className="tbl-row" style={{borderBottom:`1px solid ${V.border}`,background:isExp?V.bg2:ha?"rgba(251,191,36,.05)":V.bg}}>
                       <td style={{padding:"6px 8px"}} onClick={e=>e.stopPropagation()}><input type="checkbox" checked={selected.has(po)} onChange={()=>toggleSelect(po)} style={{cursor:"pointer"}}/></td>
                       <td style={{padding:"6px 8px",fontSize:12,fontWeight:500,whiteSpace:"nowrap",cursor:"pointer"}} onClick={()=>setExpanded(isExp?null:po)}>{ha&&<span style={{marginRight:3,fontSize:10}}>⚠</span>}{po}</td>
                       <td style={{padding:"6px 8px",fontSize:12,whiteSpace:"nowrap",cursor:"pointer"}} onClick={()=>setExpanded(isExp?null:po)}>{r["Customer"]}</td>
@@ -623,7 +688,7 @@ function Shipments({data,alerts,quickStatus,setEditRow,selected,toggleSelect,tog
                         </select>
                       </td>
                       <td style={{padding:"4px 6px",textAlign:"center"}} onClick={e=>e.stopPropagation()}>
-                        <button onClick={()=>setEditRow(r)} style={{fontSize:11,padding:"3px 8px",border:`0.5px solid ${V.border2}`,borderRadius:4,background:"transparent",cursor:"pointer",color:V.text2}}>Edit</button>
+                        <button onClick={()=>setEditRow(r)} style={{fontSize:11,padding:"5px 11px",border:`1px solid ${V.border2}`,borderRadius:7,background:"transparent",cursor:"pointer",color:V.text2,fontWeight:500}}>Edit</button>
                       </td>
                     </tr>
                     {isExp&&(
@@ -949,9 +1014,13 @@ function AlertsTab({alerts,allAlerts,typeFilter,setTypeFilter,dismiss,dismissAll
   const types=["All","overdue","transit","etd","eta","mabd"];
   return(
     <div style={{padding:24}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
-        <div><h2 style={{fontSize:18,fontWeight:500,margin:"0 0 3px"}}>Alert center</h2><div style={{fontSize:12,color:V.text2}}>Warn threshold: {WARN_DAYS} days · {today.toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric",year:"numeric"})}</div></div>
-        {alerts.length>0&&<button onClick={dismissAll} style={{fontSize:12,padding:"6px 14px",border:`0.5px solid ${V.border2}`,borderRadius:6,background:"transparent",cursor:"pointer",color:V.text}}>Dismiss all visible</button>}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20}}>
+        <div>
+          <div style={{fontSize:9,fontWeight:700,color:V.text2,textTransform:"uppercase",letterSpacing:".1em",marginBottom:5}}>Planning</div>
+          <div style={{fontSize:26,fontWeight:800,color:V.text,letterSpacing:"-0.03em",lineHeight:1,marginBottom:6}}>Alert Center</div>
+          <div style={{fontSize:12,color:V.text2}}>Warn threshold: {WARN_DAYS} days · {today.toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"})}</div>
+        </div>
+        {alerts.length>0&&<button onClick={dismissAll} style={{fontSize:12,padding:"8px 16px",border:`1px solid ${V.border2}`,borderRadius:9,background:V.bg,cursor:"pointer",color:V.text,fontWeight:500}}>Dismiss all visible</button>}
       </div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:10,marginBottom:16}}>
         {[{l:"ETA Overdue",t:"overdue",c:"#dc2626"},{l:"Transit Exceeded",t:"transit",c:"#dc2626"},{l:"ETD Approaching",t:"etd",c:"#b45309"},{l:"ETA Approaching",t:"eta",c:"#b45309"},{l:"MABD at Risk",t:"mabd",c:"#7c3aed"}].map(c=>{
@@ -1105,7 +1174,7 @@ function Analytics({data,itemSetup}){
 
   const months=Object.keys(metrics.byMonthCost).sort();
   const t=metrics.totals;
-  const sel={fontSize:12,padding:"6px 10px",border:`0.5px solid ${V.border2}`,borderRadius:8,background:V.bg,color:V.text};
+  const sel={fontSize:12,padding:"7px 10px",border:`1px solid ${V.border}`,borderRadius:8,background:V.bg,color:V.text};
   const activeFilters=[fC!=="All",fA!=="All",fS!=="In-Process",df!=="",dt!==""].filter(Boolean).length;
   function clearFilters(){setFC("All");setFA("All");setFS("In-Process");setDF("");setDT("");}
   const $f=v=>v>=1000000?`$${(v/1000000).toFixed(2)}M`:v>=1000?`$${(v/1000).toFixed(1)}k`:`$${Math.round(v).toLocaleString()}`;
@@ -1125,19 +1194,20 @@ function Analytics({data,itemSetup}){
     <div style={{padding:24}}>
 
       {/* HEADER */}
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:18}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20}}>
         <div>
-          <h2 style={{fontSize:20,fontWeight:700,margin:0,color:V.text}}>Analytics</h2>
-          <div style={{fontSize:12,color:V.text2,marginTop:3,display:"flex",alignItems:"center",gap:8}}>
+          <div style={{fontSize:9,fontWeight:700,color:V.text2,textTransform:"uppercase",letterSpacing:".1em",marginBottom:5}}>Intelligence</div>
+          <div style={{fontSize:26,fontWeight:800,color:V.text,letterSpacing:"-0.03em",lineHeight:1,marginBottom:8}}>Analytics</div>
+          <div style={{fontSize:12,color:V.text2,display:"flex",alignItems:"center",gap:8}}>
             {f.length} of {data.length} shipments
-            {activeFilters>0&&<span style={{background:"#fef3c7",color:"#92400e",fontSize:10,padding:"2px 8px",borderRadius:10,fontWeight:600}}>{activeFilters} filter{activeFilters>1?"s":""} active</span>}
+            {activeFilters>0&&<span style={{background:"#fef9c3",color:"#854d0e",fontSize:10,padding:"2px 10px",borderRadius:10,fontWeight:700,border:"1px solid #fde68a"}}>{activeFilters} filter{activeFilters>1?"s":""}</span>}
           </div>
         </div>
-        {activeFilters>0&&<button onClick={clearFilters} style={{fontSize:12,padding:"6px 14px",border:`0.5px solid ${V.border2}`,borderRadius:8,background:"transparent",cursor:"pointer",color:V.text2}}>✕ Clear</button>}
+        {activeFilters>0&&<button onClick={clearFilters} style={{fontSize:12,padding:"7px 16px",border:`1px solid ${V.border2}`,borderRadius:9,background:V.bg,cursor:"pointer",color:V.text2,fontWeight:500}}>✕ Clear filters</button>}
       </div>
 
       {/* FILTERS */}
-      <div style={{background:V.bg,border:`0.5px solid ${V.border}`,borderRadius:12,padding:"12px 16px",marginBottom:14}}>
+      <div style={{background:V.bg,border:`1px solid ${V.border}`,borderRadius:14,padding:"14px 18px",marginBottom:16,boxShadow:"0 1px 4px rgba(15,23,42,0.06)"}}>
         <div style={{display:"flex",gap:14,flexWrap:"wrap",alignItems:"flex-end"}}>
           {[["Customer",<select value={fC} onChange={e=>setFC(e.target.value)} style={sel}>{customers.map(c=><option key={c}>{c}</option>)}</select>],
             ["Agent",<select value={fA} onChange={e=>setFA(e.target.value)} style={sel}>{agents.map(a=><option key={a}>{a}</option>)}</select>],
@@ -1165,12 +1235,13 @@ function Analytics({data,itemSetup}){
         {kpiCards.map(k=>{
           const active=drill?.title===k.label;
           return(
-            <div key={k.key} onClick={()=>active?setDrill(null):openDrill(k.label,k.rows)}
-              style={{background:V.bg,border:`1px solid ${active?k.color:V.border}`,borderRadius:12,padding:"14px 12px",borderTop:`3px solid ${k.color}`,cursor:"pointer",boxShadow:active?`0 0 0 2px ${k.color}33`:"none",transition:"box-shadow .15s"}}>
-              <div style={{fontSize:10,fontWeight:600,color:V.text2,textTransform:"uppercase",letterSpacing:".04em",marginBottom:6,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{k.label}</div>
-              <div style={{fontSize:20,fontWeight:700,color:k.color,lineHeight:1,marginBottom:4}}>{k.value}</div>
+            <div key={k.key} onClick={()=>active?setDrill(null):openDrill(k.label,k.rows)} className="kpi-card"
+              style={{background:V.bg,border:`1px solid ${active?k.color:V.border}`,borderRadius:14,padding:"16px 14px",borderTop:`3px solid ${active?k.color:k.color+"aa"}`,cursor:"pointer",
+                boxShadow:active?`0 0 0 3px ${k.color}22,0 6px 24px rgba(15,23,42,0.1)`:"0 1px 3px rgba(15,23,42,0.07)"}}>
+              <div style={{fontSize:9,fontWeight:700,color:V.text2,textTransform:"uppercase",letterSpacing:".09em",marginBottom:10,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{k.label}</div>
+              <div style={{fontSize:22,fontWeight:800,color:k.color,lineHeight:1,marginBottom:5,letterSpacing:"-0.02em"}}>{k.value}</div>
               <div style={{fontSize:10,color:V.text2,lineHeight:1.4}}>{k.sub}</div>
-              <div style={{fontSize:9,color:active?"#b45309":V.text2,marginTop:5,fontStyle:"italic"}}>{active?"▲ showing detail":k.note}</div>
+              <div style={{fontSize:9,color:active?k.color:V.text2,marginTop:6,fontWeight:active?600:400}}>{active?"▲ close":"↓ drill"}</div>
             </div>
           );
         })}
@@ -1451,10 +1522,11 @@ function ItemSetup({skuCatalog,itemSetup,saveItemSetup,syncing}){
     <div style={{padding:24,maxWidth:860}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
         <div>
-          <h2 style={{fontSize:18,fontWeight:500,margin:0,marginBottom:4}}>Item Setup</h2>
-          <p style={{fontSize:13,color:V.text2,margin:0}}>Set a unit cost and customs duty percentage for each product. Values sync to your Google Sheet and are shared across all devices.</p>
+          <div style={{fontSize:9,fontWeight:700,color:V.text2,textTransform:"uppercase",letterSpacing:".1em",marginBottom:5}}>Configuration</div>
+          <div style={{fontSize:26,fontWeight:800,color:V.text,letterSpacing:"-0.03em",lineHeight:1,marginBottom:10}}>Item Setup</div>
+          <p style={{fontSize:13,color:V.text2,margin:0,maxWidth:480}}>Set unit costs and customs duty percentages for each product. Values sync to Google Sheets and apply across all devices.</p>
         </div>
-        <button onClick={handleSave} disabled={syncing} style={{fontSize:13,padding:"7px 20px",border:"none",borderRadius:8,background:syncing?"#92400e":"#b45309",color:"#fff",cursor:syncing?"default":"pointer",fontWeight:500,flexShrink:0,marginLeft:16}}>{syncing?"Syncing to Sheet…":saved?"✓ Saved":"Save changes"}</button>
+        <button onClick={handleSave} disabled={syncing} style={{fontSize:13,padding:"9px 22px",border:"none",borderRadius:10,background:syncing?"#92400e":saved?"#059669":"#b45309",color:"#fff",cursor:syncing?"default":"pointer",fontWeight:600,flexShrink:0,marginLeft:16,boxShadow:syncing?"none":"0 3px 12px rgba(180,83,9,0.3)"}}>{syncing?"Syncing…":saved?"✓ Saved":"Save changes"}</button>
       </div>
       <div style={{display:"flex",gap:8,marginBottom:18,marginTop:16}}>
         <input value={newSku} onChange={e=>setNewSku(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addManualSku()} placeholder="Add a product not yet in a shipment…" style={{...fld,flex:1,padding:"7px 10px"}}/>
