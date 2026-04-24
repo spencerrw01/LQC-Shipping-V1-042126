@@ -991,7 +991,7 @@ function Analytics({data,itemSetup}){
   itemSetup=itemSetup||{};
   const [fC,setFC]=useState("All");
   const [fA,setFA]=useState("All");
-  const [fS,setFS]=useState("All");
+  const [fS,setFS]=useState("In-Process");
   const [df,setDF]=useState("");
   const [dt,setDT]=useState("");
   const [dateField,setDateField]=useState("ETD");
@@ -1007,7 +1007,8 @@ function Analytics({data,itemSetup}){
   const f=useMemo(()=>data.filter(r=>{
     if(fC!=="All"&&r["Customer"]!==fC)return false;
     if(fA!=="All"&&r["Agent"]!==fA)return false;
-    if(fS!=="All"&&r["Status"]!==fS)return false;
+    if(fS==="In-Process"&&r["Status"]==="Delivered")return false;
+    if(fS!=="All"&&fS!=="In-Process"&&r["Status"]!==fS)return false;
     const d=parseDate(r[dateField]);
     if(df){const from=new Date(df+"T00:00:00");if(!d||d<from)return false;}
     if(dt){const to=new Date(dt+"T23:59:59");if(!d||d>to)return false;}
@@ -1052,9 +1053,10 @@ function Analytics({data,itemSetup}){
         byMonthCost[mk].count++;
       }
 
+      const ctrs=num(r["Container Qty"]);const cbm=num(r["Volume"]);
       const cust=r["Customer"]||"Unknown";
-      if(!byCustomer[cust])byCustomer[cust]={shipments:0,productCost:0,containerCost:0,drayage:0,landedCost:0,rows:[]};
-      byCustomer[cust].shipments++;byCustomer[cust].productCost+=r._pc;byCustomer[cust].containerCost+=r._cc;byCustomer[cust].drayage+=r._dr;byCustomer[cust].landedCost+=r._lc;byCustomer[cust].rows.push(r);
+      if(!byCustomer[cust])byCustomer[cust]={shipments:0,containers:0,cbm:0,productCost:0,containerCost:0,drayage:0,landedCost:0,rows:[]};
+      byCustomer[cust].shipments++;byCustomer[cust].containers+=ctrs;byCustomer[cust].cbm+=cbm;byCustomer[cust].productCost+=r._pc;byCustomer[cust].containerCost+=r._cc;byCustomer[cust].drayage+=r._dr;byCustomer[cust].landedCost+=r._lc;byCustomer[cust].rows.push(r);
 
       const ag=r["Agent"]||"Unassigned";
       if(!byAgent[ag])byAgent[ag]={shipments:0,onTimeCt:0,dated:0,transitTotal:0,rows:[]};
@@ -1066,8 +1068,8 @@ function Analytics({data,itemSetup}){
       byStatus[st].count++;byStatus[st].rows.push(r);
 
       const dest=r["Landing Location"]||r["Destination"]||"Unknown";
-      if(!byDest[dest])byDest[dest]={shipments:0,landedCost:0,rows:[]};
-      byDest[dest].shipments++;byDest[dest].landedCost+=r._lc;byDest[dest].rows.push(r);
+      if(!byDest[dest])byDest[dest]={shipments:0,containers:0,cbm:0,productCost:0,containerCost:0,drayage:0,landedCost:0,rows:[]};
+      byDest[dest].shipments++;byDest[dest].containers+=ctrs;byDest[dest].cbm+=cbm;byDest[dest].productCost+=r._pc;byDest[dest].containerCost+=r._cc;byDest[dest].drayage+=r._dr;byDest[dest].landedCost+=r._lc;byDest[dest].rows.push(r);
 
       const skus=Array.isArray(r["SKUs"])?r["SKUs"]:[];
       skus.forEach(sk=>{
@@ -1083,10 +1085,11 @@ function Analytics({data,itemSetup}){
     const skuRows=Object.entries(bySku).map(([sku,v])=>({sku,qty:v.qty,unit:v.unit,shipments:v.shipments.size,customers:v.customers.size,productCost:v.productCost,costPerUnit:v.costPerUnit,pctOfProduct:totalProduct>0?v.productCost/totalProduct*100:0})).sort((a,b)=>b.productCost-a.productCost);
     const customerRows=Object.entries(byCustomer).map(([k,v])=>({customer:k,...v,pct:totalLanded>0?v.landedCost/totalLanded*100:0})).sort((a,b)=>b.landedCost-a.landedCost);
     const agentRows=Object.entries(byAgent).map(([k,v])=>({agent:k,shipments:v.shipments,onTimeRate:v.dated>0?Math.round(v.onTimeCt/v.dated*100):null,avgTransit:v.dated>0?Math.round(v.transitTotal/v.dated):null,rows:v.rows})).sort((a,b)=>b.shipments-a.shipments);
-    const destRows=Object.entries(byDest).map(([k,v])=>({dest:k,shipments:v.shipments,landedCost:v.landedCost,rows:v.rows,pct:totalLanded>0?v.landedCost/totalLanded*100:0})).sort((a,b)=>b.landedCost-a.landedCost);
+    const destRows=Object.entries(byDest).map(([k,v])=>({dest:k,shipments:v.shipments,containers:v.containers,cbm:Math.round(v.cbm),productCost:v.productCost,containerCost:v.containerCost,drayage:v.drayage,landedCost:v.landedCost,rows:v.rows,pct:totalLanded>0?v.landedCost/totalLanded*100:0})).sort((a,b)=>b.landedCost-a.landedCost);
+    const customerRowsFull=Object.entries(byCustomer).map(([k,v])=>({customer:k,shipments:v.shipments,containers:v.containers,cbm:Math.round(v.cbm),productCost:v.productCost,containerCost:v.containerCost,drayage:v.drayage,landedCost:v.landedCost,rows:v.rows,pct:totalLanded>0?v.landedCost/totalLanded*100:0})).sort((a,b)=>b.landedCost-a.landedCost);
 
     return{
-      rows,byMonthCost,byStatus,skuRows,customerRows,agentRows,destRows,
+      rows,byMonthCost,byStatus,skuRows,customerRows:customerRowsFull,agentRows,destRows,
       openRows,overdueRows,onTimeRows,datedRows,
       totals:{shipments:rows.length,totalLanded,totalProduct,totalContainer,totalDrayage,logisticsCost,openValue,overdueCount:overdueRows.length,onTimeRate:datedRows.length?Math.round(onTimeRows.length/datedRows.length*100):null,avgCost:rows.length?totalLanded/rows.length:0,logisticsPct:totalLanded>0?Math.round(logisticsCost/totalLanded*100):0,productPct:totalLanded>0?Math.round(totalProduct/totalLanded*100):0}
     };
@@ -1095,8 +1098,8 @@ function Analytics({data,itemSetup}){
   const months=Object.keys(metrics.byMonthCost).sort();
   const t=metrics.totals;
   const sel={fontSize:12,padding:"6px 10px",border:`0.5px solid ${V.border2}`,borderRadius:8,background:V.bg,color:V.text};
-  const activeFilters=[fC!=="All",fA!=="All",fS!=="All",df!=="",dt!==""].filter(Boolean).length;
-  function clearFilters(){setFC("All");setFA("All");setFS("All");setDF("");setDT("");}
+  const activeFilters=[fC!=="All",fA!=="All",fS!=="In-Process",df!=="",dt!==""].filter(Boolean).length;
+  function clearFilters(){setFC("All");setFA("All");setFS("In-Process");setDF("");setDT("");}
   const $f=v=>v>=1000000?`$${(v/1000000).toFixed(2)}M`:v>=1000?`$${(v/1000).toFixed(1)}k`:`$${Math.round(v).toLocaleString()}`;
   function openDrill(title,rows){setDrill({title,rows:[...rows].sort((a,b)=>b._lc-a._lc)});}
 
@@ -1130,7 +1133,7 @@ function Analytics({data,itemSetup}){
         <div style={{display:"flex",gap:14,flexWrap:"wrap",alignItems:"flex-end"}}>
           {[["Customer",<select value={fC} onChange={e=>setFC(e.target.value)} style={sel}>{customers.map(c=><option key={c}>{c}</option>)}</select>],
             ["Agent",<select value={fA} onChange={e=>setFA(e.target.value)} style={sel}>{agents.map(a=><option key={a}>{a}</option>)}</select>],
-            ["Status",<select value={fS} onChange={e=>setFS(e.target.value)} style={sel}><option>All</option>{STATUSES.map(s=><option key={s}>{s}</option>)}</select>],
+            ["Status",<select value={fS} onChange={e=>setFS(e.target.value)} style={sel}><option value="In-Process">In-Process (excl. Delivered)</option><option value="All">All (incl. Delivered)</option>{STATUSES.map(s=><option key={s} value={s}>{s}</option>)}</select>],
             ["Date By",<select value={dateField} onChange={e=>setDateField(e.target.value)} style={sel}>{["ETD","ETA"].map(d=><option key={d}>{d}</option>)}</select>],
           ].map(([label,control])=>(
             <div key={label} style={{display:"flex",flexDirection:"column",gap:3}}>
@@ -1262,40 +1265,80 @@ function Analytics({data,itemSetup}){
         })()}
       </div>
 
-      {/* CUSTOMER SPEND TABLE */}
-      <div style={{background:V.bg,border:`0.5px solid ${V.border}`,borderRadius:12,overflow:"hidden",marginBottom:14}}>
-        <div style={{padding:"12px 16px",background:V.bg2,borderBottom:`0.5px solid ${V.border}`}}>
-          <div style={{fontSize:13,fontWeight:700,color:V.text}}>Customer Spend Breakdown</div>
-          <div style={{fontSize:11,color:V.text2,marginTop:2}}>Click a row to drill into that customer's shipments</div>
-        </div>
-        <div style={{overflowX:"auto"}}>
-          <table style={{width:"100%",borderCollapse:"collapse",minWidth:700,fontSize:12}}>
-            <thead>
-              <tr style={{background:V.bg3,fontSize:10,color:V.text2,textTransform:"uppercase",letterSpacing:".04em"}}>
-                {["Customer","Shipments","Product Cost","Container","Drayage","Total Landed","% of Total"].map(h=><th key={h} style={{padding:"9px 12px",textAlign:"left",borderBottom:`0.5px solid ${V.border}`,fontWeight:600,whiteSpace:"nowrap"}}>{h}</th>)}
-              </tr>
-            </thead>
-            <tbody>
-              {metrics.customerRows.map((r,i)=>(
-                <tr key={r.customer} onClick={()=>openDrill(`${r.customer} — Shipments`,r.rows)} style={{background:i%2===0?V.bg:"rgba(0,0,0,.012)",borderBottom:`0.5px solid ${V.border}`,cursor:"pointer"}}
-                  onMouseEnter={e=>e.currentTarget.style.background="#fef3c733"} onMouseLeave={e=>e.currentTarget.style.background=i%2===0?V.bg:"rgba(0,0,0,.012)"}>
-                  <td style={{padding:"9px 12px",fontWeight:600,color:V.text}}>{r.customer}</td>
-                  <td style={{padding:"9px 12px",color:V.text2,textAlign:"center"}}>{r.shipments}</td>
-                  <td style={{padding:"9px 12px",color:"#059669",fontWeight:r.productCost>0?600:400}}>{r.productCost>0?$f(r.productCost):"—"}</td>
-                  <td style={{padding:"9px 12px",color:"#f97316",fontWeight:r.containerCost>0?600:400}}>{r.containerCost>0?$f(r.containerCost):"—"}</td>
-                  <td style={{padding:"9px 12px",color:"#7c3aed",fontWeight:r.drayage>0?600:400}}>{r.drayage>0?$f(r.drayage):"—"}</td>
-                  <td style={{padding:"9px 12px",fontWeight:700,color:"#1d4ed8"}}>{r.landedCost>0?$f(r.landedCost):"—"}</td>
-                  <td style={{padding:"9px 12px"}}>
-                    <div style={{display:"flex",alignItems:"center",gap:7}}>
-                      <div style={{flex:1,height:5,background:V.bg3,borderRadius:999,overflow:"hidden",minWidth:50}}><div style={{height:"100%",width:`${r.pct}%`,background:"#1d4ed8",borderRadius:999}}/></div>
-                      <span style={{fontSize:11,fontWeight:600,color:"#1d4ed8",minWidth:32,textAlign:"right"}}>{Math.round(r.pct)}%</span>
-                    </div>
-                  </td>
+      {/* INBOUND BY WAREHOUSE + INBOUND BY CUSTOMER */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:14}}>
+
+        {/* INBOUND BY WAREHOUSE */}
+        <div style={{background:V.bg,border:`0.5px solid ${V.border}`,borderRadius:12,overflow:"hidden"}}>
+          <div style={{padding:"12px 16px",background:V.bg2,borderBottom:`0.5px solid ${V.border}`}}>
+            <div style={{fontSize:13,fontWeight:700,color:V.text}}>Inbound by Warehouse / Destination</div>
+            <div style={{fontSize:11,color:V.text2,marginTop:2}}>Click a row to drill into shipments to that location</div>
+          </div>
+          <div style={{overflowX:"auto",maxHeight:380,overflowY:"auto"}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+              <thead style={{position:"sticky",top:0}}>
+                <tr style={{background:V.bg3,fontSize:10,color:V.text2,textTransform:"uppercase",letterSpacing:".04em"}}>
+                  {["Location","POs","Ctrs","CBM","Product","Logistics","Landed"].map(h=><th key={h} style={{padding:"8px 10px",textAlign:"left",borderBottom:`0.5px solid ${V.border}`,fontWeight:600,whiteSpace:"nowrap"}}>{h}</th>)}
                 </tr>
-              ))}
-              {metrics.customerRows.length===0&&<tr><td colSpan={7} style={{padding:24,textAlign:"center",color:V.text2}}>No data.</td></tr>}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {metrics.destRows.map((r,i)=>(
+                  <tr key={r.dest} onClick={()=>openDrill(`${r.dest} — Shipments`,r.rows)} style={{background:i%2===0?V.bg:"rgba(0,0,0,.012)",borderBottom:`0.5px solid ${V.border}`,cursor:"pointer"}}
+                    onMouseEnter={e=>e.currentTarget.style.background="#fef3c733"} onMouseLeave={e=>e.currentTarget.style.background=i%2===0?V.bg:"rgba(0,0,0,.012)"}>
+                    <td style={{padding:"8px 10px",fontWeight:600,color:V.text,maxWidth:130,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                      {INTERNAL_LOCS.has(r.dest)&&<span style={{fontSize:9,fontWeight:700,padding:"1px 4px",borderRadius:3,background:"#1e293b",color:"#94a3b8",marginRight:4}}>WH</span>}
+                      {r.dest}
+                    </td>
+                    <td style={{padding:"8px 10px",color:V.text2,textAlign:"center"}}>{r.shipments}</td>
+                    <td style={{padding:"8px 10px",color:V.text2,textAlign:"center"}}>{r.containers||"—"}</td>
+                    <td style={{padding:"8px 10px",color:V.text2}}>{r.cbm>0?`${r.cbm.toLocaleString()}`:"—"}</td>
+                    <td style={{padding:"8px 10px",color:"#059669",fontWeight:r.productCost>0?600:400}}>{r.productCost>0?$f(r.productCost):"—"}</td>
+                    <td style={{padding:"8px 10px",color:"#f97316",fontWeight:(r.containerCost+r.drayage)>0?600:400}}>{(r.containerCost+r.drayage)>0?$f(r.containerCost+r.drayage):"—"}</td>
+                    <td style={{padding:"8px 10px",fontWeight:700,color:"#1d4ed8"}}>{r.landedCost>0?$f(r.landedCost):"—"}</td>
+                  </tr>
+                ))}
+                {metrics.destRows.length===0&&<tr><td colSpan={7} style={{padding:20,textAlign:"center",color:V.text2}}>No destination data.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* INBOUND BY CUSTOMER */}
+        <div style={{background:V.bg,border:`0.5px solid ${V.border}`,borderRadius:12,overflow:"hidden"}}>
+          <div style={{padding:"12px 16px",background:V.bg2,borderBottom:`0.5px solid ${V.border}`}}>
+            <div style={{fontSize:13,fontWeight:700,color:V.text}}>Inbound by Customer</div>
+            <div style={{fontSize:11,color:V.text2,marginTop:2}}>Click a row to drill into that customer's shipments</div>
+          </div>
+          <div style={{overflowX:"auto",maxHeight:380,overflowY:"auto"}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+              <thead style={{position:"sticky",top:0}}>
+                <tr style={{background:V.bg3,fontSize:10,color:V.text2,textTransform:"uppercase",letterSpacing:".04em"}}>
+                  {["Customer","POs","Ctrs","CBM","Product","Logistics","Landed","Share"].map(h=><th key={h} style={{padding:"8px 10px",textAlign:"left",borderBottom:`0.5px solid ${V.border}`,fontWeight:600,whiteSpace:"nowrap"}}>{h}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {metrics.customerRows.map((r,i)=>(
+                  <tr key={r.customer} onClick={()=>openDrill(`${r.customer} — Shipments`,r.rows)} style={{background:i%2===0?V.bg:"rgba(0,0,0,.012)",borderBottom:`0.5px solid ${V.border}`,cursor:"pointer"}}
+                    onMouseEnter={e=>e.currentTarget.style.background="#fef3c733"} onMouseLeave={e=>e.currentTarget.style.background=i%2===0?V.bg:"rgba(0,0,0,.012)"}>
+                    <td style={{padding:"8px 10px",fontWeight:600,color:V.text,maxWidth:120,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.customer}</td>
+                    <td style={{padding:"8px 10px",color:V.text2,textAlign:"center"}}>{r.shipments}</td>
+                    <td style={{padding:"8px 10px",color:V.text2,textAlign:"center"}}>{r.containers||"—"}</td>
+                    <td style={{padding:"8px 10px",color:V.text2}}>{r.cbm>0?r.cbm.toLocaleString():"—"}</td>
+                    <td style={{padding:"8px 10px",color:"#059669",fontWeight:r.productCost>0?600:400}}>{r.productCost>0?$f(r.productCost):"—"}</td>
+                    <td style={{padding:"8px 10px",color:"#f97316",fontWeight:(r.containerCost+r.drayage)>0?600:400}}>{(r.containerCost+r.drayage)>0?$f(r.containerCost+r.drayage):"—"}</td>
+                    <td style={{padding:"8px 10px",fontWeight:700,color:"#1d4ed8"}}>{r.landedCost>0?$f(r.landedCost):"—"}</td>
+                    <td style={{padding:"8px 10px"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:5}}>
+                        <div style={{width:40,height:5,background:V.bg3,borderRadius:999,overflow:"hidden"}}><div style={{height:"100%",width:`${r.pct}%`,background:"#1d4ed8",borderRadius:999}}/></div>
+                        <span style={{fontSize:10,fontWeight:600,color:"#1d4ed8"}}>{Math.round(r.pct)}%</span>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {metrics.customerRows.length===0&&<tr><td colSpan={8} style={{padding:20,textAlign:"center",color:V.text2}}>No data.</td></tr>}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
 
@@ -1339,29 +1382,6 @@ function Analytics({data,itemSetup}){
               <div style={{height:6,background:V.bg3,borderRadius:999,overflow:"hidden"}}><div style={{height:"100%",width:`${pct}%`,background:c,borderRadius:999}}/></div>
             </div>);
           })}
-        </div>
-      </div>
-
-      {/* DESTINATION BREAKDOWN */}
-      <div style={{background:V.bg,border:`0.5px solid ${V.border}`,borderRadius:12,overflow:"hidden",marginBottom:14}}>
-        <div style={{padding:"12px 16px",background:V.bg2,borderBottom:`0.5px solid ${V.border}`}}>
-          <div style={{fontSize:13,fontWeight:700,color:V.text}}>Destination Cost Breakdown</div>
-          <div style={{fontSize:11,color:V.text2,marginTop:2}}>Landing location by total landed cost — click to drill</div>
-        </div>
-        <div style={{padding:"12px 16px",display:"flex",flexDirection:"column",gap:10}}>
-          {metrics.destRows.slice(0,8).map(r=>(
-            <div key={r.dest} onClick={()=>openDrill(`${r.dest} — Shipments`,r.rows)} style={{cursor:"pointer",display:"flex",alignItems:"center",gap:10,transition:"opacity .15s"}}
-              onMouseEnter={e=>e.currentTarget.style.opacity=".7"} onMouseLeave={e=>e.currentTarget.style.opacity="1"}>
-              <div style={{fontSize:12,color:V.text,fontWeight:500,minWidth:160,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
-                {INTERNAL_LOCS.has(r.dest)&&<span style={{fontSize:9,fontWeight:700,padding:"1px 5px",borderRadius:3,background:"#1e293b",color:"#94a3b8",marginRight:5}}>WH</span>}
-                {r.dest}
-              </div>
-              <div style={{flex:1,height:8,background:V.bg3,borderRadius:999,overflow:"hidden"}}><div style={{height:"100%",width:`${r.pct}%`,background:"#0e7490",borderRadius:999}}/></div>
-              <div style={{fontSize:11,fontWeight:700,color:"#0e7490",minWidth:64,textAlign:"right"}}>{$f(r.landedCost)}</div>
-              <div style={{fontSize:11,color:V.text2,minWidth:40,textAlign:"right"}}>{r.shipments} PO{r.shipments!==1?"s":""}</div>
-            </div>
-          ))}
-          {metrics.destRows.length===0&&<div style={{fontSize:12,color:V.text2,textAlign:"center",padding:16}}>No destination data yet.</div>}
         </div>
       </div>
 
