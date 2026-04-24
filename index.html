@@ -1103,7 +1103,7 @@ function Analytics({data,itemSetup}){
         skuQty:totalSkuQty,
         estFreight:totalFreight,
         estDuty:totalDuty,
-        estLanded:totalFreight+totalDuty,
+        estLanded:totalProductCost+totalContainerCost+totalDrayage,
         onTimeRate:datedTransit?Math.round(onTimeCount/datedTransit*100):0,
         delayRisk:totalDelayRisk,
         productCost:totalProductCost,
@@ -1128,7 +1128,7 @@ function Analytics({data,itemSetup}){
   const insightCards=[
     {title:"Total Product Cost",value:`$${Math.round(metrics.totals.productCost).toLocaleString()}`,note:"From unit costs set in Item Setup",color:"#059669"},
     {title:"Container + Drayage",value:`$${Math.round(metrics.totals.logisticsCost).toLocaleString()}`,note:`Container $${Math.round(metrics.totals.containerCost).toLocaleString()} · Drayage $${Math.round(metrics.totals.drayage).toLocaleString()}`,color:"#f97316"},
-    {title:"Est. Landed Cost",value:`$${Math.round(metrics.totals.estLanded).toLocaleString()}`,note:`Est. freight + ${dutyPct}% duty`,color:"#7c3aed"},
+    {title:"Est. Landed Cost",value:`$${Math.round(metrics.totals.estLanded).toLocaleString()}`,note:"Product Cost + Container + Drayage",color:"#7c3aed"},
     {title:"Transit Reliability",value:`${metrics.totals.onTimeRate}%`,note:"Shipments within lane benchmarks",color:"#0e7490"},
     {title:"Delay Risk Exposure",value:`$${Math.round(metrics.totals.delayRisk).toLocaleString()}`,note:"Projected over-ETA holding cost",color:"#dc2626"},
   ];
